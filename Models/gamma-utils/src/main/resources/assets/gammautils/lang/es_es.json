@@ -1,0 +1,54 @@
+{
+    "key.category.gammautils.gamma": "Gamma Utils - Gamma",
+    "key.category.gammautils.nightvision": "Gamma Utils - Night Vision",
+    "key.gammautils.gammaToggle": "Conmutar Gamma",
+    "key.gammautils.increaseGamma": "Incrementar Gamma",
+    "key.gammautils.decreaseGamma": "Reducir Gamma",
+    "key.gammautils.maxGamma": "Valor de gamma máximo",
+    "key.gammautils.minGamma": "Valor de gamma mínimo",
+    "key.gammautils.nightVisionToggle": "Conmutar la visión nocturna",
+
+    "text.autoconfig.gammautils.title": "Configuración de Gamma Utils",
+
+    "text.autoconfig.gammautils.option.gamma.defaultGamma": "Porcentaje de gamma predeterminado",
+    "text.autoconfig.gammautils.option.gamma.defaultGamma.@Tooltip": "Porcentaje de gamma cuando \nel mod está desactivado",
+
+    "text.autoconfig.gammautils.option.gamma.toggledGamma": "Porcentaje de gamma conmutado",
+    "text.autoconfig.gammautils.option.gamma.toggledGamma.@Tooltip": "Porcentaje de gamma cuando \nel mod está activado",
+
+    "text.autoconfig.gammautils.option.gamma.updateToggle": "Recordar el valor más reciente",
+    "text.autoconfig.gammautils.option.gamma.updateToggle.@Tooltip": "El opción conmutable recordará el \nvalor no predeterminado más reciente \nse haya utalizado.",
+
+    "text.autoconfig.gammautils.option.gamma.gammaStep": "Cambio en porcentaje de gamma",
+    "text.autoconfig.gammautils.option.gamma.gammaStep.@Tooltip": "Cambio en porcentaje de gamma para \ncada aumento y disminución",
+
+    "text.autoconfig.gammautils.option.gamma.showStatusEffect": "Mostrar el efecto de estado",
+    "text.autoconfig.gammautils.option.gamma.showStatusEffect.@Tooltip": "Mostrar un efecto de estado cuando el porcentaje de \ngamma está fuera del rango normal \n- \"Valor alto de gamma\" más de 100% \n- \"Valor bajo de gamma\" menos de 0%",
+
+    "text.autoconfig.gammautils.option.gamma.hudMessage.showMessage": "Mostrar el mensaje de gamma",
+    "text.autoconfig.gammautils.option.gamma.hudMessage.showMessage.@Tooltip": "Mostrar una mensaje con el nuevo valor de gamma \ncuando el porcentaje de gamma ha cambiado.",
+
+    "text.autoconfig.gammautils.option.gamma.resetOnClose": "Reiniciar cuando cerrar el juego",
+    "text.autoconfig.gammautils.option.gamma.resetOnClose.@Tooltip": "Reiniciar el valor de gamma \ncuando cerrar Minecraft.",
+
+    "text.autoconfig.gammautils.option.gamma.transition.smoothTransition": "Transición liso",
+    "text.autoconfig.gammautils.option.gamma.transition.smoothTransition.@Tooltip": "Hacer la transición para \nconmutar el gamma más liso",
+
+    "text.autoconfig.gammautils.option.gamma.transition.transitionSpeed": "Velocidad del transición",
+    "text.autoconfig.gammautils.option.gamma.transition.transitionSpeed.@Tooltip": "El velocidad en porcentaje de gamma por segundo \n(cuando \"Transición liso\" está activado)",
+
+    "text.autoconfig.gammautils.option.gamma.limiter.limitCheck": "Limitar el porcentaje de gamma",
+    "text.autoconfig.gammautils.option.gamma.limiter.limitCheck.@Tooltip": "¿El mod debe aplicar el limite \nde gamma mínimo y máximo?",
+
+    "text.autoconfig.gammautils.option.gamma.limiter.minGamma": "Limite de gamma mínimo",
+    "text.autoconfig.gammautils.option.gamma.limiter.minGamma.@Tooltip": "El porcentaje de gamma mínimo que el mod \npermitirá (cuando \"Limitar el porcentaje de gamma\" está activado)",
+
+    "text.autoconfig.gammautils.option.gamma.limiter.maxGamma": "Limite de gamma máximo",
+    "text.autoconfig.gammautils.option.gamma.limiter.maxGamma.@Tooltip": "El porcentaje de gamma máximo que el mod \npermitará (cuando \"Limitar el porcentaje de gamma\" está activado)",
+
+    "text.gammautils.message.gammaPercentage": "Gamma: %d%%",
+    "text.gammautils.message.nightVisionDisabled": "Visión nocturna: Desactivado",
+
+    "effect.gammautils.bright": "Valor de gamma alto",
+    "effect.gammautils.dim": "Valor de gamma bajo"
+}

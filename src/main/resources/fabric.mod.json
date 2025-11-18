@@ -1,0 +1,38 @@
+{
+	"schemaVersion": 1,
+	"id": "customizable-brightness",
+	"version": "${version}",
+	"name": "Customizable Brightness",
+	"description": "Cycle through configurable brightness levels beyond Minecraft's 100% limit",
+	"authors": [
+		"SimplyAG"
+	],
+	"contact": {
+		"homepage": "",
+		"sources": ""
+	},
+	"license": "MIT",
+	"icon": "assets/customizable-brightness/icon.png",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"com.simplyag.customizablebrightness.CustomizableBrightnessClient"
+		],
+		"modmenu": [
+			"com.simplyag.customizablebrightness.ModMenuIntegration"
+		]
+	},
+	"mixins": [
+		"customizable-brightness.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.16.0",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"modmenu": ">=11.0.0",
+		"cloth-config": ">=15.0.0"
+	}
+}

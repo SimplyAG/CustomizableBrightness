@@ -1,0 +1,9 @@
+ICON PLACEHOLDER
+
+To add a custom icon for your mod:
+1. Create or obtain a 128x128 PNG image
+2. Rename it to "icon.png"
+3. Place it in this directory (src/main/resources/assets/customizable-brightness/)
+4. Delete this icon.png.txt file
+
+The mod will work fine without a custom icon - Minecraft will use a default placeholder.

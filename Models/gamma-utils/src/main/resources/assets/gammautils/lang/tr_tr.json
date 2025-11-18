@@ -1,0 +1,57 @@
+{
+    "key.category.gammautils.gamma": "Gamma Utils - Gamma",
+    "key.category.gammautils.nightvision": "Gamma Utils - Night Vision",
+    "key.gammautils.gammaToggle": "Aydınlatmayı Aç/Kapat",
+    "key.gammautils.increaseGamma": "Aydınlatmayı Arttır",
+    "key.gammautils.decreaseGamma": "Aydınlatmayı Azalt",
+    "key.gammautils.maxGamma": "Maksimum Aydınlatma",
+    "key.gammautils.minGamma": "Minimum Aydınlatma",
+    "key.gammautils.nightVisionToggle": "Gece Görüşü Aç/Kapa",
+
+    "text.autoconfig.gammautils.title": "Gamma Utils Ayarlar",
+
+    "text.autoconfig.gammautils.option.gamma.defaultGamma": "Varsayılan Aydınlatma Değeri",
+    "text.autoconfig.gammautils.option.gamma.defaultGamma.@Tooltip": "Mod kapalıyken geçerli aydınlatma değeri",
+
+    "text.autoconfig.gammautils.option.gamma.toggledGamma": "Seçilen Aydınlatma Değeri",
+    "text.autoconfig.gammautils.option.gamma.toggledGamma.@Tooltip": "Mod açıkken geçerli aydınlatma değeri",
+
+    "text.autoconfig.gammautils.option.gamma.updateToggle": "Seçilen Değeri Güncelle",
+    "text.autoconfig.gammautils.option.gamma.updateToggle.@Tooltip": "Bunu etkinleştirmek, geçiş değerinin, \nkullandığınız son varsayılan \nolmayan değeri hatırlamasını sağlar",
+
+    "text.autoconfig.gammautils.option.gamma.gammaStep": "Aydınlatma Değeri Kademesi",
+    "text.autoconfig.gammautils.option.gamma.gammaStep.@Tooltip": "Gamma azaltma veya çoğaltma \ndeğeri",
+
+    "text.autoconfig.gammautils.option.gamma.showStatusEffect": "Durum Efekti Göster",
+    "text.autoconfig.gammautils.option.gamma.showStatusEffect.@Tooltip": "Aydınlatma değeri normal değerler \ndışındayken bir durum efekti göster \n- \"Yüksek Aydınlatma\" 100% üzerindeyken \n- \"Düşük Aydınlatma\" 0% altındayken",
+
+    "text.autoconfig.gammautils.option.gamma.hudMessage.showMessage": "Aydınlatma Değeri Mesajı Göster",
+    "text.autoconfig.gammautils.option.gamma.hudMessage.showMessage.@Tooltip": "Aydınlatma Değeri değiştiğinde yeni \nAydınlatma Değerini ile bir mesaj göster",
+
+    "text.autoconfig.gammautils.option.gamma.resetOnClose": "Kapatırken Sıfırla",
+    "text.autoconfig.gammautils.option.gamma.resetOnClose.@Tooltip": "Minecraft'ı kapattıktan sonra aydınlatma değerini varsayılan değere sıfırla",
+
+    "text.autoconfig.gammautils.option.gamma.transition.smoothTransition": "Yumuşak Geçiş",
+    "text.autoconfig.gammautils.option.gamma.transition.smoothTransition.@Tooltip": "Modu açıp kapatırken \nışık geçişlerini yumuşat.",
+
+    "text.autoconfig.gammautils.option.gamma.transition.transitionSpeed": "Geçiş Hızı",
+    "text.autoconfig.gammautils.option.gamma.transition.transitionSpeed.@Tooltip": "Saniye başına aydınlatma değeri \n(Yumuşak Geçiş açıkken)",
+
+    "text.autoconfig.gammautils.option.gamma.limiter.limitCheck": "Limit Kontrolü",
+    "text.autoconfig.gammautils.option.gamma.limiter.limitCheck.@Tooltip": "Mod minimum ve maksimum \naydınlatma limitlerini zorlasın mı",
+
+    "text.autoconfig.gammautils.option.gamma.limiter.minGamma": "Minimum Aydınlatma Limiti",
+    "text.autoconfig.gammautils.option.gamma.limiter.minGamma.@Tooltip": "Limit Kontrolü açıkken modun \nizin vereceği minimum aydınlatma değeri",
+
+    "text.autoconfig.gammautils.option.gamma.limiter.maxGamma": "Maksimum Aydınlatma Limiti",
+    "text.autoconfig.gammautils.option.gamma.limiter.maxGamma.@Tooltip": "Limit Kontrolü açıkken modun \nizin vereceği maksimum aydınlatma değeri",
+
+    "text.autoconfig.gammautils.option.nightVision.showStatusEffect": "Gece Görüşü İkonunu Göster",
+    "text.autoconfig.gammautils.option.nightVision.showStatusEffect.@Tooltip": "Gece Görüşü İkonunu normal \nefektler gibi sağ üstte göster",
+
+    "text.gammautils.message.gammaPercentage": "Aydınlatma Değeri: %d%%",
+    "text.gammautils.message.nightVisionDisabled": "Gece Görüşü: Kapalı",
+
+    "effect.gammautils.bright": "Aydınlık",
+    "effect.gammautils.dim": "Karanlık"
+}

@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.simplyag.customizablebrightness.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "MixinSimpleOption"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
