@@ -8,7 +8,12 @@
       "Bash(./gradlew build:*)",
       "Bash(./gradlew runClient:*)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git branch:*)",
+      "Bash(git remote add:*)",
+      "Bash(git push:*)",
+      "Bash(./gradlew wrapper:*)"
     ],
     "deny": [],
     "ask": []

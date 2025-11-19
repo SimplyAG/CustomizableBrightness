@@ -6,13 +6,14 @@ import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class CustomizableBrightnessClient implements ClientModInitializer {
     private static final Logger LOGGER = LoggerFactory.getLogger("customizable-brightness");
-    private static final String KEY_CATEGORY = "key.categories.customizable-brightness";
+    private static final KeyBinding.Category KEY_CATEGORY = KeyBinding.Category.create(Identifier.of("customizable-brightness", "brightness"));
     private static final String KEY_CYCLE_BRIGHTNESS = "key.customizable-brightness.cycle";
 
     private static BrightnessConfig config;
