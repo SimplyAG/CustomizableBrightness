@@ -1,5 +1,6 @@
 package com.simplyag.customizablebrightness.mixin;
 
+//? if >=1.19 {
 import com.simplyag.customizablebrightness.CustomizableBrightnessClient;
 import net.minecraft.client.option.SimpleOption;
 import net.minecraft.text.Text;
@@ -19,9 +20,6 @@ public class MixinSimpleOption<T> {
     @Final
     Text text;
 
-    /**
-     * Mixin to return the custom gamma value instead of the vanilla one
-     */
     @Inject(method = "getValue", at = @At("HEAD"), cancellable = true)
     public void getModValue(CallbackInfoReturnable<Double> info) {
         if (isGammaOption()) {
@@ -29,9 +27,6 @@ public class MixinSimpleOption<T> {
         }
     }
 
-    /**
-     * Mixin to set the custom gamma value instead of the vanilla one
-     */
     @Inject(method = "setValue", at = @At("HEAD"), cancellable = true)
     public void setModValue(T value, CallbackInfo info) {
         if (isGammaOption()) {
@@ -45,7 +40,49 @@ public class MixinSimpleOption<T> {
         if (text.getContent() instanceof TranslatableTextContent translatableTextContent) {
             return translatableTextContent.getKey().equals("options.gamma");
         }
-
         return false;
     }
 }
+//?} else if >=1.16.5 {
+/*
+import com.simplyag.customizablebrightness.CustomizableBrightnessClient;
+import net.minecraft.client.option.GameOptions;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(GameOptions.class)
+public class MixinSimpleOption {
+    @Shadow
+    public double gamma;
+
+    @Inject(method = "write", at = @At("HEAD"))
+    private void onWrite(CallbackInfo ci) {
+        gamma = CustomizableBrightnessClient.getCurrentGamma();
+    }
+}
+*/
+//?} else {
+/*
+import com.simplyag.customizablebrightness.CustomizableBrightnessClient;
+import net.minecraft.client.options.GameOptions;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+
+@Mixin(GameOptions.class)
+public class MixinSimpleOption {
+    @Shadow
+    public double gamma;
+
+    @Inject(method = "write", at = @At("HEAD"))
+    private void onWrite(CallbackInfo ci) {
+        gamma = CustomizableBrightnessClient.getCurrentGamma();
+    }
+}
+*/
+//?}

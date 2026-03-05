@@ -1,8 +1,13 @@
 package com.simplyag.customizablebrightness;
 
 import net.fabricmc.loader.api.FabricLoader;
+//? if >=1.17 {
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+//?} else {
+/*import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;*/
+//?}
 
 import java.io.*;
 import java.nio.file.Files;
@@ -12,7 +17,11 @@ import java.util.List;
 import java.util.Properties;
 
 public class BrightnessConfig {
+    //? if >=1.17 {
     private static final Logger LOGGER = LoggerFactory.getLogger("customizable-brightness");
+    //?} else {
+    /*private static final Logger LOGGER = LogManager.getLogger("customizable-brightness");*/
+    //?}
     private static final String CONFIG_FILE_NAME = "customizable_brightness.properties";
     private static final String DEFAULT_BRIGHTNESS_STOPS = "0.0,1.0,2.0,5.0,10.0";
     private static final String BRIGHTNESS_STOPS_KEY = "brightness_stops";
