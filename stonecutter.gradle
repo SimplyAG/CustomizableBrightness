@@ -5,3 +5,6 @@ stonecutter.active "1.21.11"
 
 // Register a task that builds all versions
 stonecutter.tasks.named("build") {}
+
+// Register a task that publishes all versions to CurseForge and Modrinth
+stonecutter.tasks.named("publishMods") {}

@@ -2,6 +2,7 @@ plugins {
 	id 'dev.kikugie.stonecutter'
 	id 'fabric-loom' version '1.13-SNAPSHOT'
 	id 'maven-publish'
+	id 'me.modmuss50.mod-publish-plugin' version '1.1.0'
 }
 
 version = project.mod_version
@@ -83,5 +84,35 @@ publishing {
 	}
 
 	repositories {
+	}
+}
+
+publishMods {
+	file = remapJar.archiveFile
+	displayName = "Customizable Brightness ${project.mod_version} - MC ${project.minecraft_version}"
+	changelog = "Support for MC ${project.minecraft_version}. Press B to cycle through configurable brightness levels (0%-1000%+)."
+	type = STABLE
+	modLoaders.add("fabric")
+
+	curseforge {
+		projectId = "1388278"
+		accessToken = providers.environmentVariable("CURSEFORGE_TOKEN")
+		minecraftVersions.add(project.property("minecraft_version"))
+		requires("fabric-api")
+		if (project.findProperty('cloth_config_version') != 'NONE') {
+			optional("modmenu")
+			optional("cloth-config")
+		}
+	}
+
+	modrinth {
+		projectId = "iCas2JlM"
+		accessToken = providers.environmentVariable("MODRINTH_TOKEN")
+		minecraftVersions.add(project.property("minecraft_version"))
+		requires("fabric-api")
+		if (project.findProperty('cloth_config_version') != 'NONE') {
+			optional("modmenu")
+			optional("cloth-config-fabric")
+		}
 	}
 }
