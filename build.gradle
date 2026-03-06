@@ -112,7 +112,7 @@ publishMods {
 		requires("fabric-api")
 		if (project.findProperty('cloth_config_version') != 'NONE') {
 			optional("modmenu")
-			optional("cloth-config-fabric")
+			optional("cloth-config")
 		}
 	}
 }
