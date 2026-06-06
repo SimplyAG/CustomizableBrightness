@@ -3,20 +3,21 @@ package com.simplyag.customizablebrightness;
 import me.shedaniel.clothconfig2.api.ConfigBuilder;
 import me.shedaniel.clothconfig2.api.ConfigCategory;
 import me.shedaniel.clothconfig2.api.ConfigEntryBuilder;
-import me.shedaniel.clothconfig2.impl.builders.SubCategoryBuilder;
-import net.minecraft.client.gui.screen.Screen;
-import net.minecraft.text.Text;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
 public class ConfigScreen {
+    // Default brightness stops as percentages
+    private static final List<Integer> DEFAULT_STOPS_PERCENT = List.of(0, 100, 200, 500, 1000);
 
     public static Screen create(Screen parent) {
         ConfigBuilder builder = ConfigBuilder.create()
                 .setParentScreen(parent)
-                .setTitle(Text.literal("Customizable Brightness Config"));
+                .setTitle(Component.literal("Customizable Brightness Config"));
 
         // Get current brightness stops from config
         BrightnessConfig config = CustomizableBrightnessClient.getConfig();
@@ -27,12 +28,8 @@ public class ConfigScreen {
             config.updateBrightnessStops(brightnessStops);
         });
 
-        ConfigCategory general = builder.getOrCreateCategory(Text.literal("General"));
+        ConfigCategory general = builder.getOrCreateCategory(Component.literal("Brightness Stops"));
         ConfigEntryBuilder entryBuilder = builder.entryBuilder();
-
-        // Create a subcategory for brightness stops
-        SubCategoryBuilder brightnessCategory = entryBuilder.startSubCategory(Text.literal("Brightness Stops"));
-        brightnessCategory.setTooltip(Text.literal("Configure the brightness levels you can cycle through (as percentages)"));
 
         // Add editable fields for each brightness stop (converted to percentages for user input)
         for (int i = 0; i < brightnessStops.size(); i++) {
@@ -40,11 +37,16 @@ public class ConfigScreen {
             double multiplier = brightnessStops.get(index);
             int percentage = (int)(multiplier * 100);
 
+            // Get the default value for this index, or use the current value if beyond defaults
+            int defaultPercentage = index < DEFAULT_STOPS_PERCENT.size()
+                    ? DEFAULT_STOPS_PERCENT.get(index)
+                    : percentage;
+
             String label = String.format("Stop %d", index + 1);
 
-            brightnessCategory.add(entryBuilder.startIntField(Text.literal(label), percentage)
-                    .setDefaultValue(percentage)
-                    .setTooltip(Text.literal("Brightness level in percentage (0% = dark, 100% = normal, 1000% = very bright)"))
+            general.addEntry(entryBuilder.startIntField(Component.literal(label), percentage)
+                    .setDefaultValue(defaultPercentage)
+                    .setTooltip(Component.literal("Brightness level in percentage (0% = dark, 100% = normal, 1000% = very bright)"))
                     .setSaveConsumer(newPercentage -> {
                         if (index < brightnessStops.size()) {
                             // Convert percentage back to multiplier (0-10000% → 0.0-100.0)
@@ -57,19 +59,17 @@ public class ConfigScreen {
         }
 
         // Add info about current stops
-        brightnessCategory.add(entryBuilder.startTextDescription(
-                Text.literal("§7Add new stops by editing the config file§r\n" +
+        general.addEntry(entryBuilder.startTextDescription(
+                Component.literal("§7Add new stops by editing the config file§r\n" +
                         "§7at config/customizable_brightness.properties§r\n\n" +
                         "§eFormat:§r brightness_stops=0.0,1.0,2.0,5.0,10.0\n" +
                         "§7(Values are stored as multipliers: 1.0 = 100%)§r\n\n" +
                         "§aCurrent Stops:§r " + formatStopsList(brightnessStops)))
                 .build());
 
-        general.addEntry(brightnessCategory.build());
-
         // Add info section
         general.addEntry(entryBuilder.startTextDescription(
-                Text.literal("§6How to use:§r\n" +
+                Component.literal("§6How to use:§r\n" +
                         "• Press §eB§r (or your configured key) to cycle brightness\n" +
                         "• All values are displayed as percentages\n" +
                         "• 0% = complete darkness, 100% = normal, 1000% = max brightness\n" +
@@ -78,7 +78,7 @@ public class ConfigScreen {
                         "• Use 0% for complete darkness\n" +
                         "• Use 1000%+ for extreme brightness in caves\n" +
                         "• Keep stops sorted for best experience\n\n" +
-                        "§eClick 'Done' to save your changes!§r"))
+                        "§eClick 'Save & Quit' to save your changes!§r"))
                 .build());
 
         return builder.build();

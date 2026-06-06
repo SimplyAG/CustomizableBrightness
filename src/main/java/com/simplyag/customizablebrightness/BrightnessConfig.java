@@ -102,7 +102,6 @@ public class BrightnessConfig {
                 properties.store(output, "Customizable Brightness Configuration\n" +
                         "brightness_stops: Comma-separated list of brightness multipliers (1.0 = 100%)\n" +
                         "last_brightness_index: Index of the last used brightness level");
-                LOGGER.info("Saved configuration to {}", configPath);
             }
         } catch (IOException e) {
             LOGGER.error("Failed to save configuration", e);

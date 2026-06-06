@@ -2,25 +2,25 @@ package com.simplyag.customizablebrightness;
 
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
-import net.minecraft.text.Text;
-import net.minecraft.util.Identifier;
+import net.fabricmc.fabric.api.client.keymapping.v1.KeyMappingHelper;
+import net.minecraft.client.KeyMapping;
+import com.mojang.blaze3d.platform.InputConstants;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class CustomizableBrightnessClient implements ClientModInitializer {
     private static final Logger LOGGER = LoggerFactory.getLogger("customizable-brightness");
-    private static final KeyBinding.Category KEY_CATEGORY = KeyBinding.Category.create(Identifier.of("customizable-brightness", "brightness"));
+    private static final KeyMapping.Category KEY_CATEGORY = KeyMapping.Category.register(Identifier.fromNamespaceAndPath("customizable-brightness", "brightness"));
     private static final String KEY_CYCLE_BRIGHTNESS = "key.customizable-brightness.cycle";
 
     private static BrightnessConfig config;
     private static double currentGamma = 1.0;
     private static int currentBrightnessIndex = 1;
 
-    private KeyBinding cycleBrightnessKey;
+    private KeyMapping cycleBrightnessKey;
     private boolean initialized = false;
 
     @Override
@@ -33,9 +33,9 @@ public class CustomizableBrightnessClient implements ClientModInitializer {
         currentGamma = config.getBrightnessAtIndex(currentBrightnessIndex);
 
         // Register keybinding
-        cycleBrightnessKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+        cycleBrightnessKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
                 KEY_CYCLE_BRIGHTNESS,
-                InputUtil.Type.KEYSYM,
+                InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_B,
                 KEY_CATEGORY
         ));
@@ -48,13 +48,13 @@ public class CustomizableBrightnessClient implements ClientModInitializer {
 
             // One-time initialization to set the gamma from config
             if (!initialized) {
-                client.options.getGamma().setValue(currentGamma);
+                client.options.gamma().set(currentGamma);
                 initialized = true;
                 LOGGER.info("Set initial brightness to: {}x ({}%)", currentGamma, (int)(currentGamma * 100));
             }
 
             // Check if the keybind was pressed
-            while (cycleBrightnessKey.wasPressed()) {
+            while (cycleBrightnessKey.consumeClick()) {
                 cycleBrightness(client);
             }
         });
@@ -62,7 +62,7 @@ public class CustomizableBrightnessClient implements ClientModInitializer {
         LOGGER.info("Customizable Brightness mod initialized successfully");
     }
 
-    private void cycleBrightness(net.minecraft.client.MinecraftClient client) {
+    private void cycleBrightness(net.minecraft.client.Minecraft client) {
         // Cycle to next brightness level
         currentBrightnessIndex = (currentBrightnessIndex + 1) % config.getBrightnessStopsCount();
 
@@ -70,25 +70,23 @@ public class CustomizableBrightnessClient implements ClientModInitializer {
         double brightness = config.getBrightnessAtIndex(currentBrightnessIndex);
 
         // Apply the brightness (this will trigger our mixin)
-        client.options.getGamma().setValue(brightness);
+        client.options.gamma().set(brightness);
 
         // Save the current index
         config.saveLastBrightnessIndex(currentBrightnessIndex);
 
         // Display feedback to player
         displayBrightnessFeedback(client, brightness);
-
-        LOGGER.info("Brightness changed to: {}x ({}%)", brightness, (int)(brightness * 100));
     }
 
-    private void displayBrightnessFeedback(net.minecraft.client.MinecraftClient client, double brightness) {
+    private void displayBrightnessFeedback(net.minecraft.client.Minecraft client, double brightness) {
         // Always display as percentage (0% to 1000%+)
         int percentage = (int)(brightness * 100);
-        String message = "§eBrightness: §f" + percentage + "%";
+        String message = "\u00a7eBrightness: \u00a7f" + percentage + "%";
 
         // Send message to action bar
-        if (client.player != null) {
-            client.player.sendMessage(Text.literal(message), true);
+        if (client.gui != null) {
+            client.gui.setOverlayMessage(Component.literal(message), true);
         }
     }
 
@@ -111,15 +109,5 @@ public class CustomizableBrightnessClient implements ClientModInitializer {
      */
     public static BrightnessConfig getConfig() {
         return config;
-    }
-
-    /**
-     * Save configuration (called from GUI)
-     */
-    public static void saveConfiguration() {
-        if (config != null) {
-            config.saveConfig();
-            LOGGER.info("Configuration saved from GUI");
-        }
     }
 }

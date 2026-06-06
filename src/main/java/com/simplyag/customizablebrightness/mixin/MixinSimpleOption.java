@@ -1,9 +1,9 @@
 package com.simplyag.customizablebrightness.mixin;
 
 import com.simplyag.customizablebrightness.CustomizableBrightnessClient;
-import net.minecraft.client.option.SimpleOption;
-import net.minecraft.text.Text;
-import net.minecraft.text.TranslatableTextContent;
+import net.minecraft.client.OptionInstance;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.contents.TranslatableContents;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -13,26 +13,26 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-@Mixin(SimpleOption.class)
+@Mixin(OptionInstance.class)
 public class MixinSimpleOption<T> {
     @Shadow
     @Final
-    Text text;
+    private Component caption;
 
     /**
      * Mixin to return the custom gamma value instead of the vanilla one
      */
-    @Inject(method = "getValue", at = @At("HEAD"), cancellable = true)
-    public void getModValue(CallbackInfoReturnable<Double> info) {
+    @Inject(method = "get", at = @At("HEAD"), cancellable = true)
+    public void getModValue(CallbackInfoReturnable<T> info) {
         if (isGammaOption()) {
-            info.setReturnValue(CustomizableBrightnessClient.getCurrentGamma());
+            info.setReturnValue((T)(Double)CustomizableBrightnessClient.getCurrentGamma());
         }
     }
 
     /**
      * Mixin to set the custom gamma value instead of the vanilla one
      */
-    @Inject(method = "setValue", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "set", at = @At("HEAD"), cancellable = true)
     public void setModValue(T value, CallbackInfo info) {
         if (isGammaOption()) {
             CustomizableBrightnessClient.setCurrentGamma((Double) value);
@@ -42,8 +42,8 @@ public class MixinSimpleOption<T> {
 
     @Unique
     private boolean isGammaOption() {
-        if (text.getContent() instanceof TranslatableTextContent translatableTextContent) {
-            return translatableTextContent.getKey().equals("options.gamma");
+        if (caption.getContents() instanceof TranslatableContents translatableContents) {
+            return translatableContents.getKey().equals("options.gamma");
         }
 
         return false;
