@@ -1,0 +1,130 @@
+// Build script for the unobfuscated, year-based Minecraft targets (26.1, 26.1.1, 26.1.2).
+//
+// These versions ship WITHOUT obfuscation, so Fabric dropped Yarn/intermediary for them:
+//   - plugin is net.fabricmc.fabric-loom (non-remapping), NOT the Yarn-era fabric-loom
+//   - there is NO `mappings` line (the game uses Mojang official names natively)
+//   - dependency configs are plain implementation/api (no modImplementation/remapJar)
+//   - Java 25 toolchain
+// This file is wired ONLY to the 26.x targets via settings.gradle .buildscript('mojmap.gradle');
+// the 40 Yarn targets keep using the untouched build.gradle.
+// Translated from the port/26.1-standalone reference.
+
+plugins {
+	id 'dev.kikugie.stonecutter'
+	id 'net.fabricmc.fabric-loom' version '1.15-SNAPSHOT'
+	id 'maven-publish'
+	id 'me.modmuss50.mod-publish-plugin' version '1.1.0'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = "${project.archives_base_name}-mc${project.minecraft_version}"
+}
+
+repositories {
+	maven {
+		name = "TerraformersMC"
+		url = "https://maven.terraformersmc.com/"
+	}
+	maven {
+		name = "Shedaniel"
+		url = "https://maven.shedaniel.me/"
+	}
+	maven {
+		name = "Nucleoid"
+		url = "https://maven.nucleoid.xyz/"
+	}
+}
+
+dependencies {
+	// Unobfuscated Minecraft: no `mappings` line, plain implementation/api configurations.
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+	// Mod Menu and Cloth Config
+	implementation "com.terraformersmc:modmenu:${project.modmenu_version}"
+	api("me.shedaniel.cloth:cloth-config-fabric:${project.cloth_config_version}") {
+		exclude(group: "net.fabricmc.fabric-api")
+	}
+}
+
+def fabricApiId = project.findProperty('fabric_api_id') ?: 'fabric-api'
+
+processResources {
+	inputs.property "version", project.version
+	inputs.property "minecraft_version", project.minecraft_version
+	inputs.property "java_version", project.findProperty('java_version') ?: '25'
+	inputs.property "fabric_api_id", fabricApiId
+
+	filesMatching("fabric.mod.json") {
+		expand "version": project.version,
+			   "minecraft_version": project.minecraft_version,
+			   "java_version": project.findProperty('java_version') ?: '25',
+			   "fabric_api_id": fabricApiId
+	}
+
+	// The shared mixins.json hardcodes JAVA_21 (correct for the Yarn targets). The unobfuscated
+	// targets compile at Java 25, so bump the mixin compatibility level here only, at resource
+	// processing time, leaving the shared source file byte-for-byte unchanged.
+	filesMatching("customizable-brightness.mixins.json") {
+		filter { String line -> line.replace('"JAVA_21"', '"JAVA_25"') }
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 25
+}
+
+java {
+	withSourcesJar()
+
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+}
+
+jar {
+	from("LICENSE") {
+		rename { "${it}_${project.base.archivesName.get()}"}
+	}
+}
+
+publishing {
+	publications {
+		mavenJava(MavenPublication) {
+			from components.java
+		}
+	}
+
+	repositories {
+	}
+}
+
+publishMods {
+	// New-Loom is non-remapping, so the publishable artifact is `jar`, not `remapJar`.
+	file = jar.archiveFile
+	displayName = "Customizable Brightness ${project.mod_version} - MC ${project.minecraft_version}"
+	changelog = "Support for MC ${project.minecraft_version}. Press B to cycle through configurable brightness levels (0%-1000%+)."
+	type = STABLE
+	modLoaders.add("fabric")
+
+	curseforge {
+		projectId = "1388278"
+		accessToken = providers.environmentVariable("CURSEFORGE_TOKEN")
+		minecraftVersions.add(project.property("minecraft_version"))
+		requires("fabric-api")
+		optional("modmenu")
+		optional("cloth-config")
+	}
+
+	modrinth {
+		projectId = "iCas2JlM"
+		accessToken = providers.environmentVariable("MODRINTH_TOKEN")
+		minecraftVersions.add(project.property("minecraft_version"))
+		requires("fabric-api")
+		optional("modmenu")
+		optional("cloth-config")
+	}
+}
