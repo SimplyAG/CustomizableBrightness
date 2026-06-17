@@ -86,9 +86,15 @@ public class CustomizableBrightnessClient implements ClientModInitializer {
         String message = "\u00a7eBrightness: \u00a7f" + percentage + "%";
 
         // Send message to action bar
+        //? if >=26.2 {
+        if (client.player != null) {
+            client.player.sendOverlayMessage(Component.literal(message));
+        }
+        //?} else {
         if (client.gui != null) {
             client.gui.setOverlayMessage(Component.literal(message), true);
         }
+        //?}
     }
 
     
