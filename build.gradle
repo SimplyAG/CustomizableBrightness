@@ -107,6 +107,9 @@ publishMods {
 	curseforge {
 		projectId = "1388278"
 		accessToken = providers.environmentVariable("CURSEFORGE_TOKEN")
+		// CurseForge now rejects uploads without an environment tag; this mod is client-only.
+		clientRequired = true
+		serverRequired = false
 		minecraftVersions.add(project.property("minecraft_version"))
 		requires("fabric-api")
 		if (project.findProperty('cloth_config_version') != 'NONE') {
