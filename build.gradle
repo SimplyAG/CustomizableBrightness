@@ -54,6 +54,16 @@ processResources {
 			   "java_version": project.findProperty('java_version') ?: '21',
 			   "fabric_api_id": project.findProperty('fabric_api_id') ?: 'fabric'
 	}
+
+	// The shared mixins.json hardcodes JAVA_21. Mixin refuses to elevate to a compatibility level the
+	// running JRE doesn't support, so on the 25 targets whose bundled JVM is < 21 (1.14.3 - 1.20.4) the
+	// game crashed at startup. Rewrite the level per target at resource-processing time, driven by the
+	// same java_version property used above (same technique mojmap.gradle uses for JAVA_25). The shared
+	// source file stays untouched; for the java_version=21 targets the replacement is a no-op.
+	def mixinJavaLevel = "JAVA_${project.findProperty('java_version') ?: '21'}"
+	filesMatching("customizable-brightness.mixins.json") {
+		filter { String line -> line.replace('"JAVA_21"', "\"${mixinJavaLevel}\"") }
+	}
 }
 
 def javaVersion = Integer.parseInt(project.findProperty('java_version') ?: '21')
