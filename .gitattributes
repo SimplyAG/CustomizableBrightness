@@ -1,0 +1,6 @@
+# Normalize line endings so a jar built on Windows contains the same resource bytes as one built on macOS/Linux.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.png binary
+*.jar binary
+*.zip binary

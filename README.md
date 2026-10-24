@@ -1,107 +1,57 @@
 # Customizable Brightness
 
-A Fabric mod for Minecraft 1.21.1 that allows you to cycle through configurable brightness levels beyond Minecraft's normal 100% limit.
+A client-side Fabric mod that lets you cycle through brightness levels beyond Minecraft's normal 100% limit, for Minecraft 1.14.4 through 26.3.
+
+**Press `B` in game** to step to the next brightness level: 0% → 100% → 200% → 500% → 1000% by default. The current level appears above your hotbar.
 
 ## Features
 
-- **Keybind**: Press `B` (configurable) to cycle through brightness levels
-- **Configurable Stops**: Default brightness levels: 0%, 100%, 200%, 500%, 1000%
-- **Beyond Normal Limits**: Go way beyond Minecraft's standard 100% brightness
-- **Visual Feedback**: See your current brightness level in the action bar
-- **Persistent Settings**: Your last brightness level is saved and restored on game restart
-- **Fully Customizable**: Edit the config file to add your own brightness levels
-- **Mod Menu Integration**: Configure brightness stops through an in-game GUI (requires Mod Menu and Cloth Config)
-
-## Building
-
-To build the mod from source:
-
-```bash
-./gradlew build
-```
-
-On Windows:
-```cmd
-gradlew.bat build
-```
-
-The compiled mod will be in `build/libs/customizable-brightness-1.0.0.jar`
+- **One key**: press `B` (rebindable under *Options → Controls → Key Binds → Customizable Brightness*)
+- **Your own levels**: defaults are 0%, 100%, 200%, 500%, 1000%; set any values you like
+- **Remembered between sessions**: the game reopens at the brightness you left it on, whether you chose it with `B` or with the vanilla Brightness slider
+- **Action-bar feedback** on every press
+- **Hard to miss**: a tutorial-style hint in the corner shows your key until you first press it
+- **In-game config** through Mod Menu + Cloth Config (1.16.5 and newer)
 
 ## Installation
 
-### Required:
-1. Install [Fabric Loader](https://fabricmc.net/use/)
-2. Install [Fabric API](https://www.curseforge.com/minecraft/mc-mods/fabric-api)
-3. Place the mod jar in your `.minecraft/mods` folder
-4. Launch Minecraft 1.21.1 with Fabric
+1. Install [Fabric Loader](https://fabricmc.net/use/) and [Fabric API](https://modrinth.com/mod/fabric-api)
+2. Download the file for your Minecraft version from [Modrinth](https://modrinth.com/mod/customizable-brightness) or CurseForge
+3. Put it in your `.minecraft/mods` folder and launch the game
 
-### Optional (for GUI config):
-5. Install [Mod Menu](https://modrinth.com/mod/modmenu)
-6. Install [Cloth Config](https://modrinth.com/mod/cloth-config)
-7. Access config through Mods menu in-game
+Optional, for the in-game config screen (1.16.5+): [Mod Menu](https://modrinth.com/mod/modmenu) and [Cloth Config](https://modrinth.com/mod/cloth-config).
+
+## Supported versions
+
+| Minecraft | Java |
+|-----------|------|
+| 1.14.4 – 1.16.5 | 8+ |
+| 1.17 – 1.17.1 | 16+ |
+| 1.18 – 1.20.4 | 17+ |
+| 1.20.5 – 1.21.11 | 21+ |
+| 26.1 – 26.3 | 25+ |
+
+Each download lists exactly the Minecraft versions it has been tested on.
 
 ## Configuration
 
-### Option 1: GUI (Recommended)
-If you have Mod Menu and Cloth Config installed:
-1. Open the Mods menu in-game
-2. Find "Customizable Brightness" and click the config button
-3. Edit brightness stops in the GUI
-4. Click "Save" to apply changes
-
-### Option 2: Manual Config File
-The config file is located at `config/customizable_brightness.properties` in your Minecraft directory.
-
-### Default Configuration
+Use Mod Menu → Customizable Brightness → config, or edit `config/customizable_brightness.properties`:
 
 ```properties
 brightness_stops=0.0,1.0,2.0,5.0,10.0
-last_brightness_index=1
 ```
 
-### Customizing Brightness Levels
+Values are multipliers (`1.0` = 100%) and are shown as percentages in game. For example, `brightness_stops=0.0,0.5,1.0,1.5,3.0,7.0,15.0` gives 0%, 50%, 100%, 150%, 300%, 700%, 1500%. Keep the list sorted for the most natural cycling. The file also stores the brightness in use (`current_brightness`); you don't need to edit that.
 
-Edit the `brightness_stops` value with comma-separated multipliers:
-- `0.0` = 0% brightness (complete darkness)
-- `1.0` = 100% brightness (normal)
-- `2.0` = 200% brightness
-- `5.0` = 500% brightness
-- `10.0` = 1000% brightness
+## Known limitations
 
-**Note:** Values are stored as multipliers internally (1.0 = 100%), but displayed as percentages everywhere in the UI.
+- **Shader packs** (Iris, OptiFine shaders) mostly do their own lighting and ignore Minecraft's brightness above 100%. With a shader pack active, 0%–100% works, but higher levels look like 100%. Without shaders every level works, including with Sodium.
+- The vanilla Brightness slider only goes to 100%. Moving it sets the brightness to the slider's value, which is kept like any other level; the next `B` press continues from the nearest stop above it.
 
-Example custom configuration:
-```properties
-brightness_stops=0.0,0.5,1.0,1.5,3.0,7.0,15.0
-```
-This will create stops at: 0%, 50%, 100%, 150%, 300%, 700%, 1500%
+## Building
 
-The config file is automatically created with defaults if it doesn't exist.
-
-## Usage
-
-1. Press `B` (default keybind) to cycle through brightness levels
-2. The current brightness level will be displayed above your hotbar
-3. Your selected brightness persists between game sessions
-
-You can change the keybind in Minecraft's Controls settings under the "Customizable Brightness" category.
-
-## Requirements
-
-### Required:
-- Minecraft 1.21.1
-- Fabric Loader 0.16.0+
-- Fabric API
-- Java 21+
-
-### Optional (for GUI config):
-- Mod Menu 11.0.0+
-- Cloth Config 15.0.0+
+This is a [Stonecutter](https://stonecutter.kikugie.dev/) multi-version project. See [CONTRIBUTING.md](CONTRIBUTING.md) for the JDKs each target needs, the release groups, and the release process (clean build, smoke test, staged publish, reconcile).
 
 ## License
 
-MIT License - See LICENSE file for details
-
-## Author
-
-SimplyAG
+MIT. See [LICENSE](LICENSE).

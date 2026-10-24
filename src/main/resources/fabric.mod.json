@@ -8,8 +8,9 @@
 		"SimplyAG"
 	],
 	"contact": {
-		"homepage": "",
-		"sources": ""
+		"homepage": "https://github.com/SimplyAG/CustomizableBrightness",
+		"sources": "https://github.com/SimplyAG/CustomizableBrightness",
+		"issues": "https://github.com/SimplyAG/CustomizableBrightness/issues"
 	},
 	"license": "MIT",
 	"icon": "assets/customizable-brightness/icon.png",
@@ -26,8 +27,8 @@
 		"customizable-brightness.mixins.json"
 	],
 	"depends": {
-		"fabricloader": ">=0.14.0",
-		"minecraft": "${minecraft_version}",
+		"fabricloader": ">=${loader_floor}",
+		"minecraft": ["${minecraft_dep}"],
 		"java": ">=${java_version}",
 		"${fabric_api_id}": "*"
 	},

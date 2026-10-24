@@ -1,26 +1,30 @@
-// Build script for the unobfuscated, year-based Minecraft targets (26.1, 26.1.1, 26.1.2).
+// Build script for the unobfuscated, year-based Minecraft targets (26.1, 26.1.1, 26.1.2, 26.2, 26.3).
 //
 // These versions ship WITHOUT obfuscation, so Fabric dropped Yarn/intermediary for them:
 //   - plugin is net.fabricmc.fabric-loom (non-remapping), NOT the Yarn-era fabric-loom
 //   - there is NO `mappings` line (the game uses Mojang official names natively)
 //   - dependency configs are plain implementation/api (no modImplementation/remapJar)
 //   - Java 25 toolchain
+// Loom 1.17 is what Fabric recommends for 26.3; it needs Gradle 9.5+ (the shared wrapper is 9.6.0).
 // This file is wired ONLY to the 26.x targets via settings.gradle .buildscript('mojmap.gradle');
-// the 40 Yarn targets keep using the untouched build.gradle.
+// the 40 Yarn targets keep using build.gradle.
 // Translated from the port/26.1-standalone reference.
 
 plugins {
 	id 'dev.kikugie.stonecutter'
-	id 'net.fabricmc.fabric-loom' version '1.15-SNAPSHOT'
+	id 'net.fabricmc.fabric-loom' version '1.17-SNAPSHOT'
 	id 'maven-publish'
 	id 'me.modmuss50.mod-publish-plugin' version '1.1.0'
 }
+
+// Release groups, staged publishing and the jar allowlist (shared with build.gradle).
+apply from: rootProject.file('gradle/release-target.gradle')
 
 version = project.mod_version
 group = project.maven_group
 
 base {
-	archivesName = "${project.archives_base_name}-mc${project.minecraft_version}"
+	archivesName = "${project.archives_base_name}-mc${cbArchiveSuffix}"
 }
 
 repositories {
@@ -51,42 +55,46 @@ dependencies {
 	}
 }
 
-def fabricApiId = project.findProperty('fabric_api_id') ?: 'fabric-api'
+def javaVersion = cbJavaVersion as int
 
 processResources {
 	inputs.property "version", project.version
-	inputs.property "minecraft_version", project.minecraft_version
-	inputs.property "java_version", project.findProperty('java_version') ?: '25'
-	inputs.property "fabric_api_id", fabricApiId
+	inputs.property "minecraft_dep", cbMinecraftDepItems
+	inputs.property "java_version", javaVersion
+	inputs.property "fabric_api_id", cbFabricApiId
 
 	filesMatching("fabric.mod.json") {
 		expand "version": project.version,
-			   "minecraft_version": project.minecraft_version,
-			   "java_version": project.findProperty('java_version') ?: '25',
-			   "fabric_api_id": fabricApiId
+			   "minecraft_dep": cbMinecraftDepItems,
+			   "java_version": javaVersion,
+			   "loader_floor": project.loader_floor,
+			   "fabric_api_id": cbFabricApiId
 	}
 
 	// The shared mixins.json hardcodes JAVA_21 (correct for the Yarn targets). The unobfuscated
 	// targets compile at Java 25, so bump the mixin compatibility level here only, at resource
 	// processing time, leaving the shared source file byte-for-byte unchanged.
 	filesMatching("customizable-brightness.mixins.json") {
-		filter { String line -> line.replace('"JAVA_21"', '"JAVA_25"') }
+		filter { String line -> line.replace('"JAVA_21"', "\"JAVA_${javaVersion}\"") }
 	}
 }
 
 tasks.withType(JavaCompile).configureEach {
-	it.options.release = 25
+	it.options.release = javaVersion
+	// JDK 25 is required to compile against the 26.x game jars, whatever JDK runs Gradle (#1).
+	it.javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(25) }
 }
 
 java {
 	withSourcesJar()
 
-	sourceCompatibility = JavaVersion.VERSION_25
-	targetCompatibility = JavaVersion.VERSION_25
+	sourceCompatibility = JavaVersion.toVersion(javaVersion)
+	targetCompatibility = JavaVersion.toVersion(javaVersion)
 }
 
 jar {
-	from("LICENSE") {
+	// rootProject: each Stonecutter version is its own project directory, which has no LICENSE of its own.
+	from(rootProject.file("LICENSE")) {
 		rename { "${it}_${project.base.archivesName.get()}"}
 	}
 }
@@ -103,17 +111,14 @@ publishing {
 }
 
 publishMods {
-	// New-Loom is non-remapping, so the publishable artifact is `jar`, not `remapJar`.
-	file = jar.archiveFile
-	displayName = "Customizable Brightness ${project.mod_version} - MC ${project.minecraft_version}"
-	changelog = "Support for MC ${project.minecraft_version}. Press B to cycle through configurable brightness levels (0%-1000%+)."
-	type = STABLE
-	modLoaders.add("fabric")
-
+	// File, name, changelog and dry run come from gradle/release-target.gradle (staged files only).
 	curseforge {
 		projectId = "1388278"
 		accessToken = providers.environmentVariable("CURSEFORGE_TOKEN")
-		minecraftVersions.add(project.property("minecraft_version"))
+		// CurseForge now rejects uploads without an environment tag; this mod is client-only. (#6)
+		clientRequired = true
+		serverRequired = false
+		minecraftVersions.addAll(cbGroupVersions)
 		requires("fabric-api")
 		optional("modmenu")
 		optional("cloth-config")
@@ -122,9 +127,12 @@ publishMods {
 	modrinth {
 		projectId = "iCas2JlM"
 		accessToken = providers.environmentVariable("MODRINTH_TOKEN")
-		minecraftVersions.add(project.property("minecraft_version"))
+		minecraftVersions.addAll(cbGroupVersions)
 		requires("fabric-api")
 		optional("modmenu")
 		optional("cloth-config")
 	}
 }
+
+// Pre-publish smoke test (test-only source set, never in the release jar).
+apply from: rootProject.file('gradle/smoke-target.gradle')

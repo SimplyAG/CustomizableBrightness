@@ -29,3 +29,6 @@ logs/
 
 # Config files (user-specific, don't commit)
 config/
+
+# Staged release files and smoke-test results (verified locally, never committed)
+release-staging/

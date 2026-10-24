@@ -1,0 +1,18 @@
+{
+	"schemaVersion": 1,
+	"id": "cbsmoke",
+	"version": "0.0.0",
+	"name": "Customizable Brightness smoke test (test-only, never published)",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"com.simplyag.customizablebrightness.smoke.SmokeClient"
+		]
+	},
+	"mixins": [
+		"cbsmoke.mixins.json"
+	],
+	"depends": {
+		"fabricloader": "*"
+	}
+}
