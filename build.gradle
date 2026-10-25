@@ -5,11 +5,14 @@ plugins {
 	id 'me.modmuss50.mod-publish-plugin' version '1.1.0'
 }
 
+// Release groups, staged publishing and the jar allowlist (shared with mojmap.gradle).
+apply from: rootProject.file('gradle/release-target.gradle')
+
 version = project.mod_version
 group = project.maven_group
 
 base {
-	archivesName = "${project.archives_base_name}-mc${project.minecraft_version}"
+	archivesName = "${project.archives_base_name}-mc${cbArchiveSuffix}"
 }
 
 repositories {
@@ -42,34 +45,40 @@ dependencies {
 	}
 }
 
+// Every member of a release group compiles at the group lead's Java level (cbJavaVersion), so the members'
+// classes can be compared byte for byte and the lead's jar runs on all of them.
+def javaVersion = cbJavaVersion as int
+
 processResources {
 	inputs.property "version", project.version
-	inputs.property "minecraft_version", project.minecraft_version
-	inputs.property "java_version", project.findProperty('java_version') ?: '21'
-	inputs.property "fabric_api_id", project.findProperty('fabric_api_id') ?: 'fabric'
+	inputs.property "minecraft_dep", cbMinecraftDepItems
+	inputs.property "java_version", javaVersion
+	inputs.property "fabric_api_id", cbFabricApiId
 
 	filesMatching("fabric.mod.json") {
 		expand "version": project.version,
-			   "minecraft_version": project.minecraft_version,
-			   "java_version": project.findProperty('java_version') ?: '21',
-			   "fabric_api_id": project.findProperty('fabric_api_id') ?: 'fabric'
+			   "minecraft_dep": cbMinecraftDepItems,
+			   "java_version": javaVersion,
+			   "loader_floor": project.findProperty('loader_floor') ?: '0.14.0',
+			   "fabric_api_id": cbFabricApiId
 	}
 
 	// The shared mixins.json hardcodes JAVA_21. Mixin refuses to elevate to a compatibility level the
 	// running JRE doesn't support, so on the 25 targets whose bundled JVM is < 21 (1.14.3 - 1.20.4) the
 	// game crashed at startup. Rewrite the level per target at resource-processing time, driven by the
-	// same java_version property used above (same technique mojmap.gradle uses for JAVA_25). The shared
-	// source file stays untouched; for the java_version=21 targets the replacement is a no-op.
-	def mixinJavaLevel = "JAVA_${project.findProperty('java_version') ?: '21'}"
+	// same Java level used above (same technique mojmap.gradle uses for JAVA_25). The shared
+	// source file stays untouched; for the Java 21 targets the replacement is a no-op.
+	def mixinJavaLevel = "JAVA_${javaVersion}"
 	filesMatching("customizable-brightness.mixins.json") {
 		filter { String line -> line.replace('"JAVA_21"', "\"${mixinJavaLevel}\"") }
 	}
 }
 
-def javaVersion = Integer.parseInt(project.findProperty('java_version') ?: '21')
-
 tasks.withType(JavaCompile).configureEach {
 	it.options.release = javaVersion
+	// Always javac 21 for the Yarn targets, whatever JDK runs Gradle: keeps their bytes reproducible
+	// (javac versions number lambdas differently) and lets one invocation build Yarn and 26.x targets (#1).
+	it.javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(21) }
 }
 
 java {
@@ -81,7 +90,8 @@ java {
 }
 
 jar {
-	from("LICENSE") {
+	// rootProject: each Stonecutter version is its own project directory, which has no LICENSE of its own.
+	from(rootProject.file("LICENSE")) {
 		rename { "${it}_${project.base.archivesName.get()}"}
 	}
 }
@@ -98,19 +108,14 @@ publishing {
 }
 
 publishMods {
-	file = remapJar.archiveFile
-	displayName = "Customizable Brightness ${project.mod_version} - MC ${project.minecraft_version}"
-	changelog = "Support for MC ${project.minecraft_version}. Press B to cycle through configurable brightness levels (0%-1000%+)."
-	type = STABLE
-	modLoaders.add("fabric")
-
+	// File, name, changelog and dry run come from gradle/release-target.gradle (staged files only).
 	curseforge {
 		projectId = "1388278"
 		accessToken = providers.environmentVariable("CURSEFORGE_TOKEN")
 		// CurseForge now rejects uploads without an environment tag; this mod is client-only.
 		clientRequired = true
 		serverRequired = false
-		minecraftVersions.add(project.property("minecraft_version"))
+		minecraftVersions.addAll(cbGroupVersions)
 		requires("fabric-api")
 		if (project.findProperty('cloth_config_version') != 'NONE') {
 			optional("modmenu")
@@ -121,7 +126,7 @@ publishMods {
 	modrinth {
 		projectId = "iCas2JlM"
 		accessToken = providers.environmentVariable("MODRINTH_TOKEN")
-		minecraftVersions.add(project.property("minecraft_version"))
+		minecraftVersions.addAll(cbGroupVersions)
 		requires("fabric-api")
 		if (project.findProperty('cloth_config_version') != 'NONE') {
 			optional("modmenu")
@@ -129,3 +134,6 @@ publishMods {
 		}
 	}
 }
+
+// Pre-publish smoke test (test-only source set, never in the release jar).
+apply from: rootProject.file('gradle/smoke-target.gradle')

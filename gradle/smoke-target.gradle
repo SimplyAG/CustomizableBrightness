@@ -1,0 +1,410 @@
+// Pre-publish smoke test (test-only: the smoke source set is never part of a release jar).
+//
+//   gradlew :<mc>:smokeTest            runs the staged jar of <mc>'s release group in a real client on <mc>
+//   gradlew :<mc>:smokeTest -PsmokeJar=<path>   runs any jar instead (e.g. a published 1.0.x jar, for a baseline)
+//
+// Each variant (vanilla, plus "sodium" where smoke_sodium is set) gets a fresh game directory and up to ten launches of
+// the production client (Loom's ClientProductionRunTask: official game jar + Fabric Loader, the mod as a plain jar,
+// exactly like a player's install). The in-game harness (src/smoke) presses B through the keyboard handler, takes
+// F2 screenshots, drives the Brightness option with Video Settings open, and quits; each launch checks what the
+// previous one quit with. smokeCheck<Variant> evaluates the results and writes
+// release-staging/<mod_version>/smoke/<mc>[-variant].json, which verifyStagedRelease requires before publishing.
+
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+import javax.imageio.ImageIO
+import java.security.MessageDigest
+
+def mcVersion = project.property('minecraft_version') as String
+def loomClassLoader = project.extensions.getByName('loom').class.classLoader
+def productionRunTask = Class.forName('net.fabricmc.loom.task.prod.ClientProductionRunTask', true, loomClassLoader)
+
+// The unconditional -XX: options from Mojang's version manifest (Loom caches it per version), as Prism passes them.
+def mojangInfo = new File(gradle.gradleUserHomeDir, "caches/fabric-loom/${mcVersion}/mojang_minecraft_info.json")
+if (!mojangInfo.exists()) throw new GradleException("Mojang version manifest for ${mcVersion} not found at ${mojangInfo}")
+def mojangJvmArgs = ((new JsonSlurper().parse(mojangInfo).arguments?.jvm ?: []) as List)
+        .findAll { it instanceof String && it.startsWith('-XX:') } as List<String>
+
+def smoke = sourceSets.create('smoke') {
+    compileClasspath += sourceSets.main.compileClasspath
+}
+tasks.named('compileSmokeJava') {
+    options.release = cbJavaVersion
+}
+
+def smokeDevJar = tasks.register('smokeDevJar', Jar) {
+    from smoke.output
+    archiveBaseName = 'cbsmoke'
+    archiveVersion = mcVersion
+    archiveClassifier = 'dev'
+    destinationDirectory = layout.buildDirectory.dir('smoke/jars')
+}
+def smokeModJar = smokeDevJar
+if (tasks.names.contains('remapJar')) {
+    smokeModJar = tasks.register('remapSmokeJar', Class.forName('net.fabricmc.loom.task.RemapJarTask', true, loomClassLoader)) {
+        inputFile = smokeDevJar.flatMap { it.archiveFile }
+        archiveBaseName = 'cbsmoke'
+        archiveVersion = mcVersion
+        archiveClassifier = ''
+        destinationDirectory = layout.buildDirectory.dir('smoke/jars')
+    }
+}
+
+// The jar under test: the staged file of this version's release group, unless -PsmokeJar overrides it.
+def modJarPath = providers.gradleProperty('smokeJar').map { file(it) }.orElse(provider { cbStagedJar.asFile })
+
+def detached = { String notation ->
+    configurations.detachedConfiguration(dependencies.create(notation)).tap { transitive = false }
+}
+// Yarn targets run the Modrinth file players download: older Maven fabric-api jars (e.g. 0.28.5+1.14) are empty
+// shells whose modules are separate dependencies.
+def fabricApiArtifact = project.findProperty('fabric_api_artifact') ?:
+        (tasks.names.contains('remapJar') ? 'maven.modrinth:fabric-api' : 'net.fabricmc.fabric-api:fabric-api')
+def runtimeMods = [detached("${fabricApiArtifact}:${project.fabric_version}")]
+// -PsmokeWithout=modmenu,cloth leaves those out (diagnosis only; releases always test with them).
+// smoke_without in a version's gradle.properties: where no Mod Menu exists that works with that version's Fabric API.
+def smokeWithout = ((project.findProperty('smokeWithout') ?: project.findProperty('smoke_without') ?: '') as String).split(',')*.trim() as Set
+if (project.findProperty('cloth_config_version') && project.cloth_config_version != 'NONE') {
+    // Same coordinates the build compiles against (Modrinth maven for Yarn targets, TerraformersMC for 26.x).
+    def modMenu = tasks.names.contains('remapJar') ? "maven.modrinth:modmenu:${project.modmenu_version}" : "com.terraformersmc:modmenu:${project.modmenu_version}"
+    if (!smokeWithout.contains('modmenu')) runtimeMods << detached(project.findProperty('smoke_modmenu') ?: modMenu)
+    // smoke_cloth: the Cloth Config players install, where the compile-time version is an older drop's.
+    if (!smokeWithout.contains('cloth')) runtimeMods << detached(project.findProperty('smoke_cloth') ?: "me.shedaniel.cloth:cloth-config-fabric:${project.cloth_config_version}")
+}
+
+// Java the players' launcher uses for this version (Mojang's java_version), not the compile level.
+int runtimeJava = Integer.parseInt(project.java_version as String)
+if (runtimeJava == 16) runtimeJava = 17 // 1.17.x: no JDK 16 builds are maintained; 17 is what launchers use now
+def launcher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(runtimeJava) }
+
+def variants = ['vanilla': []]
+if (project.findProperty('smoke_sodium')) variants['sodium'] = [detached(project.smoke_sodium as String)]
+
+def resultDir = rootProject.layout.projectDirectory.dir("release-staging/${project.mod_version}/smoke")
+def smokeChecks = []
+// Full persistence matrix (launches 0-9) on the group lead, on versions marked smoke_full and on every non-vanilla
+// variant; other members compile to byte-identical classes, so they get a quick check (launches 1-2: key hint, B,
+// screenshots, keybind category, logs, and one restart). -PsmokeFull forces the full matrix. Launch 0 creates the
+// world and quits without pressing B, so launch 1 proves the key hint comes back for a player who ignored it.
+def fullSmoke = { String variant -> cbIsLead || variant != 'vanilla' || project.hasProperty('smokeFull') || (project.findProperty('smoke_full') as String) == 'true' }
+
+variants.each { variant, extraMods ->
+    def cap = variant.capitalize()
+    int launches = fullSmoke(variant) ? 9 : 2
+    int first = fullSmoke(variant) ? 0 : 1
+    def gameDir = layout.buildDirectory.dir("smoke/${variant}")
+
+    def prepare = tasks.register("smokePrepare${cap}") {
+        group = 'smoke'
+        outputs.upToDateWhen { false }
+        doLast {
+            def dir = gameDir.get().asFile
+            dir.deleteDir()
+            dir.mkdirs()
+            // Seed only what keeps a headless run deterministic; everything else stays at vanilla defaults.
+            new File(dir, 'options.txt').text = [
+                    'pauseOnLostFocus:false', 'tutorialStep:none', 'onboardAccessibility:false',
+                    'narrator:0', 'joinedFirstServer:true', 'skipMultiplayerWarning:true',
+                    'renderDistance:6', 'fov:0.0',
+                    'soundCategory_master:0.0' // silent: the harness needs no sound, and it would play over whatever the user is doing
+            ].join('\n') + '\n'
+        }
+    }
+
+    def previous = prepare
+    (first..launches).each { int i ->
+        def after = previous // captured now: the configure block below runs lazily, after the loop has moved on
+        def launch = tasks.register("smokeLaunch${cap}${i}", productionRunTask) {
+            group = 'smoke'
+            dependsOn after, smokeModJar
+            // Replace Loom's defaults (which add this project's own freshly built jar): exactly these mods run.
+            mods.setFrom(modJarPath, smokeModJar, runtimeMods, extraMods)
+            runDir = gameDir
+            javaLauncher = launcher
+            // Headless: a Fabric Loader error (e.g. incompatible mods) then fails the launch instead of opening a
+            // window that waits for a click. The game itself renders through GLFW/SDL, not AWT.
+            jvmArgs.addAll('-Xmx2G', '-Djava.awt.headless=true', "-Dcbsmoke.launch=${i}".toString(),
+                    "-Dcbsmoke.first=${first}".toString(), "-Dcbsmoke.last=${launches}".toString())
+            // Loom's production run ignores the JVM arguments in Mojang's version manifest; launchers (Prism, the
+            // vanilla launcher) pass them. 26.3 needs -XX:StackShadowPages=32 or it crashes natively at boot/shutdown.
+            jvmArgs.addAll(mojangJvmArgs)
+            // Last resort if anything else hangs before the harness watchdog is running.
+            timeout = java.time.Duration.ofMinutes(15)
+            // A native crash report, if the JVM gets to write one, always lands in the game directory.
+            jvmArgs.add(gameDir.map { "-XX:ErrorFile=${it.asFile}/hs_err_pid%p.log".toString() })
+            programArgs.addAll('--username', 'CBSmoke')
+            outputs.upToDateWhen { false }
+            // Loom's run() is called from our own action so a launch that dies before the game finished starting
+            // (no startup marker from the harness) can be retried where smoke_startup_retries allows it (26.3 only).
+            // Every crash is recorded in results.jsonl; a crash after startup is never retried.
+            int attempts = (project.findProperty('smoke_startup_retries') ?: '1') as int
+            actions.clear()
+            doLast { task ->
+                def game = gameDir.get().asFile
+                def marker = new File(game, "cbsmoke/started-${i}")
+                try {
+                    for (int attempt = 1; ; attempt++) {
+                        marker.delete()
+                        try {
+                            task.run()
+                            break
+                        } catch (Exception e) {
+                            def m = e.message =~ /exit value (-?\d+)/
+                            def exit = m.find() ? m.group(1) as long : null
+                            def crashFiles = cbSmokeCollectCrashFiles(game, "launch-${i}-attempt-${attempt}")
+                            boolean started = marker.exists()
+                            boolean retry = !started && attempt < attempts
+                            cbSmokeAppendEvent(game, [launch: i, event: 'launchCrash', attempt: attempt, of: attempts,
+                                    exit: exit, exitHex: exit == null ? null : String.format('0x%08X', exit & 0xFFFFFFFFL),
+                                    started: started, retried: retry, crashFiles: crashFiles])
+                            if (!retry) throw e
+                            logger.lifecycle("smoke: launch ${i} died before startup (exit ${exit}), attempt ${attempt + 1} of ${attempts}")
+                        }
+                    }
+                } finally {
+                    // Minecraft keeps only 7 rotated logs a day, so each launch keeps its own copy for the checks.
+                    def logDir = new File(game, 'cbsmoke/launch-logs')
+                    logDir.mkdirs()
+                    def latest = new File(game, 'logs/latest.log')
+                    if (latest.exists()) {
+                        java.nio.file.Files.copy(latest.toPath(), new File(logDir, "launch-${i}.log").toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                    }
+                }
+            }
+        }
+        previous = launch
+    }
+
+    def check = tasks.register("smokeCheck${cap}") {
+        group = 'smoke'
+        dependsOn previous
+        outputs.upToDateWhen { false }
+        def label = variant == 'vanilla' ? mcVersion : "${mcVersion}-${variant}"
+        doLast {
+            def dir = gameDir.get().asFile
+            File modJar = modJarPath.get()
+            def result = cbEvaluateSmoke(new File(dir, 'cbsmoke'), new File(dir, 'cbsmoke/launch-logs'), first, launches, cbAtLeast(mcVersion, '1.19'))
+            result.minecraft = mcVersion
+            result.variant = variant
+            result.modJar = modJar.name
+            result.modJarSha256 = cbSmokeSha256(modJar)
+            result.testedAt = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+            def out = resultDir.file("${label}.json").asFile
+            out.parentFile.mkdirs()
+            out.text = JsonOutput.prettyPrint(JsonOutput.toJson(result))
+            logger.lifecycle("smoke ${label}: ${result.passed ? 'PASS' : 'FAIL'}  (${modJar.name})")
+            result.checks.each { logger.lifecycle(String.format('  %-4s %s', it.ok ? 'ok' : 'FAIL', it.name) + (it.detail ? "  -- ${it.detail}" : '')) }
+            result.notes.each { logger.lifecycle("  note ${it}") }
+            if (!result.passed) throw new GradleException("Smoke test failed on ${label}; see ${out}")
+        }
+    }
+    smokeChecks << check
+}
+
+tasks.register('smokeTest') {
+    group = 'smoke'
+    description = "Runs the release jar in a real ${mcVersion} client (see gradle/smoke-target.gradle)."
+    dependsOn smokeChecks
+}
+
+static String cbSmokeSha256(File file) {
+    def md = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int read
+        while ((read = input.read(buffer)) > 0) md.update(buffer, 0, read)
+    }
+    md.digest().encodeHex().toString()
+}
+
+static double cbLuminance(File png) {
+    def image = ImageIO.read(png)
+    // Centre 60% of the frame: the ground in front of the player, away from sky and frame edges.
+    int x0 = (int) (image.width * 0.2), x1 = (int) (image.width * 0.8)
+    int y0 = (int) (image.height * 0.2), y1 = (int) (image.height * 0.8)
+    double sum = 0
+    int n = 0
+    for (int y = y0; y < y1; y += 2) {
+        for (int x = x0; x < x1; x += 2) {
+            int rgb = image.getRGB(x, y)
+            sum += 0.2126 * ((rgb >> 16) & 0xFF) + 0.7152 * ((rgb >> 8) & 0xFF) + 0.0722 * (rgb & 0xFF)
+            n++
+        }
+    }
+    sum / n
+}
+
+static void cbSmokeAppendEvent(File gameDir, Map event) {
+    def results = new File(gameDir, 'cbsmoke/results.jsonl')
+    results.parentFile.mkdirs()
+    results << JsonOutput.toJson(event) + '\n'
+}
+
+// After a crashed attempt: keeps that attempt's log and moves any hs_err_pid file the JVM wrote into cbsmoke/crash,
+// returning each one's header lines (the error, the problematic frame and the JRE/OS summary).
+static List cbSmokeCollectCrashFiles(File gameDir, String tag) {
+    def crashDir = new File(gameDir, 'cbsmoke/crash')
+    crashDir.mkdirs()
+    def latest = new File(gameDir, 'logs/latest.log')
+    if (latest.exists()) {
+        java.nio.file.Files.copy(latest.toPath(), new File(crashDir, "${tag}.log").toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+    (gameDir.listFiles() ?: []).findAll { it.name.startsWith('hs_err_pid') }.collect { File f ->
+        def kept = new File(crashDir, "${tag}-${f.name}")
+        java.nio.file.Files.move(f.toPath(), kept.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        def header = kept.readLines().takeWhile { !it.startsWith('---------------') }
+                .findAll { it.startsWith('# ') && it.length() > 2 && !it.contains('http') }
+                .collect { it.substring(2).trim() }.take(12)
+        [file: kept.name, header: header]
+    }
+}
+
+// Turns results.jsonl + screenshots + logs into named pass/fail checks.
+// Numeric version comparison (1.19 < 1.19.4 < 1.21.11 < 26.1).
+static boolean cbAtLeast(String version, String min) {
+    def a = version.tokenize('.')*.toInteger(), b = min.tokenize('.')*.toInteger()
+    for (int i = 0; i < Math.max(a.size(), b.size()); i++) {
+        int x = i < a.size() ? a[i] : 0, y = i < b.size() ? b[i] : 0
+        if (x != y) return x > y
+    }
+    true
+}
+
+static Map cbEvaluateSmoke(File dir, File logs, int first, int launches, boolean vanillaValidatesGamma) {
+    def checks = []
+    def check = { name, ok, detail = null -> checks << [name: name as String, ok: ok as boolean, detail: detail as String] }
+    def resultsFile = new File(dir, 'results.jsonl')
+    if (!resultsFile.exists()) {
+        check('harness produced results', false, 'no results.jsonl')
+        return [passed: false, checks: checks]
+    }
+    def events = resultsFile.readLines().findAll { it.trim() }.collect { new JsonSlurper().parseText(it) }
+    events.findAll { it.event == 'failure' }.each { check("harness: launch ${it.launch}", false, it.message as String) }
+
+    def states = events.findAll { it.event == 'state' }
+    def state = { int launch, String label -> states.find { it.launch == launch && it.label == label } }
+    def shot = { Map s -> s?.shot ? new File(dir, "shots/${s.shot}") : null }
+    def lum = [:]
+    states.each { s -> def f = shot(s); if (f?.exists()) lum[s] = cbLuminance(f) }
+    def near = { a, b -> a != null && b != null && Math.abs((a as double) - (b as double)) < 1e-4 }
+
+    // Every launch ran to the end.
+    (first..launches).each { l ->
+        check("launch ${l} completed", events.any { it.launch == l && (it.event == 'quit') })
+    }
+
+    // Launch 1: fresh install starts at 100%, five real B presses walk the default stops.
+    def initial = state(first, 'initial')
+    check('fresh install starts at 100%', near(initial?.modGamma, 1.0) && near(initial?.vanillaGamma, 1.0),
+            "mod=${initial?.modGamma} vanilla=${initial?.vanillaGamma}")
+    def expectedStops = [2.0, 5.0, 10.0, 0.0, 1.0]
+    expectedStops.eachWithIndex { expected, i ->
+        def s = state(1, "press-${i + 1}")
+        check("B press ${i + 1} -> ${(int) (expected * 100)}%", near(s?.modGamma, expected) && near(s?.vanillaGamma, expected),
+                "mod=${s?.modGamma} vanilla=${s?.vanillaGamma}")
+    }
+
+    // What the game renders follows the brightness: screenshot luminance at each stop.
+    def l0 = lum[state(1, 'press-4')], l100 = lum[state(1, 'press-5')], l200 = lum[state(1, 'press-1')]
+    def l500 = lum[state(1, 'press-2')], l1000 = lum[state(1, 'press-3')]
+    def lumDetail = String.format('0%%=%.1f 100%%=%.1f 200%%=%.1f 500%%=%.1f 1000%%=%.1f', l0 ?: -1d, l100 ?: -1d, l200 ?: -1d, l500 ?: -1d, l1000 ?: -1d)
+    check('screenshots: 0% < 100% < 200%', l0 != null && l100 != null && l200 != null && l0 < l100 && l100 < l200, lumDetail)
+    check('screenshots: 200% <= 500% <= 1000%, 1000% brighter than 100%',
+            l200 != null && l500 != null && l1000 != null && l200 <= l500 + 0.5 && l500 <= l1000 + 0.5 && l1000 > l100 * 1.2, lumDetail)
+
+    // Lightmap texture (only versions that build it on the CPU expose it): darkest cell rises with brightness.
+    def lm = { String label -> state(1, label)?.lightmap }
+    if (lm('press-4') != null) {
+        def dark = { String label -> lm(label)[0] as int }
+        check('lightmap: dark cell 0% < 100% < 200% <= 1000%',
+                dark('press-4') < dark('press-5') && dark('press-5') < dark('press-1') && dark('press-1') <= dark('press-3'),
+                "0%=${dark('press-4')} 100%=${dark('press-5')} 200%=${dark('press-1')} 1000%=${dark('press-3')}")
+    }
+
+    // Persistence: each launch restores exactly what the previous one quit with, mod and vanilla alike.
+    ((first + 1)..launches).each { l ->
+        def before = state(l - 1, 'quit')
+        def after = state(l, 'restored')
+        def scenario = events.find { it.launch == l - 1 && it.event == 'quit' }?.scenario
+        check("persist: ${scenario} (launch ${l - 1} -> ${l})",
+                near(before?.modGamma, after?.modGamma) && near(after?.modGamma, after?.vanillaGamma),
+                "quit mod=${before?.modGamma} | restored mod=${after?.modGamma} vanilla=${after?.vanillaGamma} options.txt=${after?.optionsGamma}")
+    }
+
+    // The slider moves were really applied before quitting.
+    events.findAll { it.event == 'slider' }.each { sl ->
+        def q = state(sl.launch as int, 'quit')
+        boolean followedByB = sl.launch in [5]
+        if (!followedByB) check("slider ${sl.value} applied (launch ${sl.launch}, ${sl.screen})", near(q?.modGamma, sl.value), "quit mod=${q?.modGamma}")
+    }
+
+    // options.txt only ever holds a value vanilla accepts. From 1.19 vanilla validates gamma (0..1) and rejects
+    // anything else; before 1.19 it is an unchecked double that vanilla loads as written (1.0.1 wrote it above 1 too),
+    // so there the values are only reported.
+    def outOfRange = states.findAll { s -> def v = s.optionsGamma; v ==~ /-?[0-9.Ee-]+/ && ((v as double) < 0 || (v as double) > 1) }
+    def outOfRangeDetail = outOfRange.collect { "${it.launch}/${it.label}=${it.optionsGamma}" }.join(', ')
+    if (vanillaValidatesGamma) {
+        check('options.txt gamma always within 0..1', outOfRange.isEmpty(), outOfRangeDetail)
+    }
+
+    // Keybind category is translated (not shown as a raw key).
+    def cat = events.find { it.event == 'keyCategory' }
+    check('Controls shows a translated category', cat?.text && cat.text != cat.key && !(cat.text as String).startsWith('key.') && !(cat.text as String).startsWith('category.'),
+            "key=${cat?.key} text=${cat?.text}")
+
+    def config = events.find { it.event == 'configScreen' }
+    if (config && !(config.status as String).startsWith('skipped')) {
+        check('Mod Menu config screen opens', (config.status as String).startsWith('opened'), config.status as String)
+    }
+
+    // Logs (one copy per launch): no options-save errors, no mod errors.
+    def logFiles = (first..launches).collect { new File(logs, "launch-${it}.log") }
+    def missingLogs = logFiles.findAll { !it.exists() }*.name
+    check('a log for every launch', missingLogs.isEmpty(), missingLogs ? "missing ${missingLogs}" : null)
+    def logText = logFiles.findAll { it.exists() }.collect { it.getText('UTF-8') }.join('\n')
+    def saveErrors = logText.readLines().findAll { it.contains('Error saving option') }
+    check('no "Error saving option" in any launch', saveErrors.isEmpty(), saveErrors ? "${saveErrors.size()}x: ${saveErrors[0].take(160)}" : null)
+    def modErrors = logText.readLines().findAll { it =~ /(ERROR|FATAL)\].*(customizable-brightness|customizablebrightness)/ || it.contains('Mixin apply failed') }
+    check('no mod errors or mixin failures in logs', modErrors.isEmpty(), modErrors ? modErrors[0].take(200) : null)
+    int hintsShown = logText.count('Showed the key hint toast'), hintsDismissed = logText.count('Key hint dismissed')
+    check("key hint toast shown ${first == 0 ? 2 : 1}x and dismissed once (logs)",
+            hintsShown == (first == 0 ? 2 : 1) && hintsDismissed == 1, "shown ${hintsShown}x, dismissed ${hintsDismissed}x")
+
+    // The key hint toast, as the game's toast manager holds it (the mod's own instance, and no other tutorial toast).
+    def toast = { int l, String label -> events.find { it.event == 'toast' && it.launch == l && it.label == label } }
+    def dismissedSaved = { e -> (e?.config as String)?.contains('hint_dismissed=true') }
+    def shown = { e -> e?.present && e?.ours && e?.count == 1 && !dismissedSaved(e) }
+    def toastDetail = { e -> e == null ? 'no toast check' : "present=${e.present} ours=${e.ours} count=${e.count} modHint=${e.modHint} config=${e.config}" }
+    if (first == 0) {
+        check('key hint toast shown on first join', shown(toast(0, 'hint')), toastDetail(toast(0, 'hint')))
+        check('key hint toast shows again after a launch that never pressed B', shown(toast(1, 'hint')), toastDetail(toast(1, 'hint')))
+    } else {
+        check('key hint toast shown on first join', shown(toast(1, 'hint')), toastDetail(toast(1, 'hint')))
+    }
+    def gone = toast(1, 'hint-dismissed')
+    check('key hint toast gone after pressing B, dismissal saved', gone && !gone.present && !gone.modHint && dismissedSaved(gone), toastDetail(gone))
+    def later = (2..launches).collect { toast(it, 'hint-absent') }
+    def shownLater = later.findAll { !it || it.present || it.modHint }
+    check('key hint toast never shows again once dismissed', shownLater.isEmpty(), shownLater ? toastDetail(shownLater[0]) : null)
+
+    // Notes are recorded but do not fail the run.
+    def notes = []
+    if (!vanillaValidatesGamma && outOfRange) notes << "options.txt gamma above 1 (unchecked before 1.19): ${outOfRangeDetail}".toString()
+    notes += events.findAll { it.event == 'seedIgnored' }.collect { "launch ${it.launch}: vanilla ignored the seeded options.txt; onboarding screen dismissed".toString() }
+    // Crashed attempts (the run only gets this far if every launch eventually started and finished).
+    events.findAll { it.event == 'launchCrash' }.each { c ->
+        def hsErr = c.crashFiles ? c.crashFiles.collect { "${it.file}: ${(it.header as List).join(' / ')}" }.join('; ') : 'no hs_err_pid file'
+        notes << "launch ${c.launch} attempt ${c.attempt}/${c.of}: died ${c.started ? 'after' : 'before'} startup, exit ${c.exit} (${c.exitHex}), ${c.retried ? 'retried' : 'not retried'}; ${hsErr}".toString()
+    }
+    def crashes = events.findAll { it.event == 'launchCrash' }
+    if (crashes) {
+        check('startup crashes stayed within the retry limit', crashes.every { !it.started && it.retried },
+                "${crashes.size()} crashed attempt(s)")
+    }
+
+    [passed: checks.every { it.ok }, checks: checks, notes: notes,
+     luminance: [p0: l0, p100: l100, p200: l200, p500: l500, p1000: l1000]]
+}

@@ -3,8 +3,15 @@ plugins {
 }
 stonecutter.active "1.21.11"
 
+// Which Minecraft versions share one published jar (see release-groups.json). Read here, before the version
+// projects are configured, so every target sees the same groups.
+ext.cbReleaseGroups = new groovy.json.JsonSlurper().parse(file('release-groups.json')).groups
+
+// verifyGroupClasses, stageRelease, reconcileRelease
+apply from: 'gradle/release-root.gradle'
+
 // Register a task that builds all versions
 stonecutter.tasks.named("build") {}
 
-// Register a task that publishes all versions to CurseForge and Modrinth
-stonecutter.tasks.named("publishMods") {}
+// There is deliberately no aggregate publishMods task: publishing is per target only
+// (:<group lead>:publishModrinth / :<group lead>:publishCurseforge), and only of staged files.

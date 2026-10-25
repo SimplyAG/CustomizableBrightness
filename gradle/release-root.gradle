@@ -1,0 +1,273 @@
+// Release tooling that works across all targets. Applied from stonecutter.gradle (the root project only).
+//
+//   verifyGroupClasses  every member of a release group compiled to byte-identical classes (the evidence
+//                       that one jar can serve the whole group)
+//   stageRelease        copies each group's jar into release-staging/<mod_version>/ with a hash manifest.
+//                       Refuses unless the same invocation cleaned every target (clean build rule).
+//   reconcileRelease    downloads every published file of <mod_version> from Modrinth and CurseForge and
+//                       checks it against the manifest: hash, version, Minecraft list, mixin level, allowlist,
+//                       platform tags. Any gap fails the task with a table. (Issue #7)
+//
+// Publishing (per target) lives in gradle/release-target.gradle and only ever uploads staged files.
+
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
+def releaseGroups = rootProject.ext.cbReleaseGroups
+def modVersion = rootProject.property('mod_version') as String
+def stagingDir = rootProject.layout.projectDirectory.dir("release-staging/${modVersion}")
+
+static String cbDigest(File file, String algorithm) {
+    def md = MessageDigest.getInstance(algorithm)
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int read
+        while ((read = input.read(buffer)) > 0) md.update(buffer, 0, read)
+    }
+    md.digest().encodeHex().toString()
+}
+
+static Map<String, byte[]> cbClassEntries(File jar) {
+    def classes = new TreeMap<String, byte[]>()
+    new ZipFile(jar).withCloseable { zip ->
+        zip.entries().each { entry ->
+            if (entry.name.endsWith('.class')) classes[entry.name] = zip.getInputStream(entry).bytes
+        }
+    }
+    classes
+}
+
+static String cbGit(File dir, String... args) {
+    def process = (['git'] + args.toList()).execute(null, dir)
+    def out = process.text.trim()
+    if (process.waitFor() != 0) throw new GradleException("git ${args.join(' ')} failed")
+    out
+}
+
+tasks.register('verifyGroupClasses') {
+    group = 'release'
+    description = 'Checks that every member of each release group compiles to byte-identical classes.'
+    releaseGroups.each { g -> g.minecraft.each { v -> dependsOn(":${v}:cbReleaseJar") } }
+    def reportFile = layout.buildDirectory.file('release/group-classes.txt')
+    outputs.upToDateWhen { false }
+    doLast {
+        def report = new StringBuilder()
+        def failures = []
+        releaseGroups.each { g ->
+            def lead = g.minecraft[0]
+            def leadClasses = cbClassEntries(project(":${lead}").ext.cbReleaseJarFile.get().asFile)
+            g.minecraft.drop(1).each { member ->
+                def memberClasses = cbClassEntries(project(":${member}").ext.cbReleaseJarFile.get().asFile)
+                def problems = []
+                (leadClasses.keySet() + memberClasses.keySet()).each { name ->
+                    if (!leadClasses.containsKey(name)) problems << "only in ${member}: ${name}"
+                    else if (!memberClasses.containsKey(name)) problems << "only in ${lead}: ${name}"
+                    else if (!Arrays.equals(leadClasses[name], memberClasses[name])) problems << "differs: ${name}"
+                }
+                if (problems) {
+                    failures << "${lead} vs ${member}"
+                    report << "MISMATCH ${lead} vs ${member}\n" << problems.collect { "    ${it}" }.join('\n') << '\n'
+                } else {
+                    report << "identical ${lead} vs ${member} (${leadClasses.size()} classes)\n"
+                }
+            }
+            if (g.minecraft.size() == 1) report << "single    ${lead}\n"
+        }
+        def out = reportFile.get().asFile
+        out.parentFile.mkdirs()
+        out.text = report.toString()
+        logger.lifecycle(report.toString())
+        if (failures) throw new GradleException("Release groups are not byte-identical: ${failures.join(', ')}. See ${out}")
+    }
+}
+
+tasks.register('stageRelease') {
+    group = 'release'
+    description = "Copies each release group's jar into release-staging/${modVersion} and writes manifest.json."
+    dependsOn 'verifyGroupClasses'
+    releaseGroups.each { g -> dependsOn(":${g.minecraft[0]}:verifyJarContents") }
+    outputs.upToDateWhen { false }
+    doFirst {
+        // Clean build rule: every target in this invocation must have been cleaned first.
+        def notCleaned = releaseGroups.collectMany { it.minecraft }.findAll { v ->
+            !gradle.taskGraph.hasTask(":${v}:clean")
+        }
+        if (notCleaned) {
+            throw new GradleException("stageRelease must run in the same invocation as clean for every target " +
+                    "(missing: ${notCleaned.join(', ')}). Use: gradlew clean <build tasks> stageRelease")
+        }
+        def dir = stagingDir.asFile
+        if (dir.exists() && dir.listFiles()) {
+            throw new GradleException("${dir} already holds a staged release. Staged files are never overwritten; " +
+                    "move it aside yourself if you really mean to restage.")
+        }
+    }
+    doLast {
+        def dir = stagingDir.asFile
+        dir.mkdirs()
+        def entries = releaseGroups.collect { g ->
+            def lead = project(":${g.minecraft[0]}")
+            File jar = lead.ext.cbReleaseJarFile.get().asFile
+            File staged = new File(dir, jar.name)
+            java.nio.file.Files.copy(jar.toPath(), staged.toPath())
+            def jarEntries = new ZipFile(staged).withCloseable { zip -> zip.entries().collect { it.name }.sort() }
+            [
+                    target           : lead.name,
+                    file             : staged.name,
+                    size             : staged.length(),
+                    sha1             : cbDigest(staged, 'SHA-1'),
+                    sha256           : cbDigest(staged, 'SHA-256'),
+                    sha512           : cbDigest(staged, 'SHA-512'),
+                    minecraftVersions: g.minecraft,
+                    minecraftDepends : [lead.ext.cbMinecraftRange],
+                    javaVersion      : lead.ext.cbJavaVersion as int,
+                    mixinLevel       : "JAVA_${lead.ext.cbJavaVersion}".toString(),
+                    fabricApiId      : lead.ext.cbFabricApiId,
+                    jarEntries       : jarEntries,
+            ]
+        }
+        def manifest = [
+                modVersion: modVersion,
+                gitCommit : cbGit(rootDir, 'rev-parse', 'HEAD'),
+                gitTree   : cbGit(rootDir, 'rev-parse', 'HEAD^{tree}'),
+                gitDirty  : !cbGit(rootDir, 'status', '--porcelain', '--untracked-files=no').isEmpty(),
+                gradle    : gradle.gradleVersion,
+                stagedAt  : new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX"),
+                files     : entries,
+        ]
+        new File(dir, 'manifest.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(manifest))
+        logger.lifecycle("Staged ${entries.size()} files in ${dir}")
+        entries.each { logger.lifecycle("  ${it.file}  sha256=${it.sha256}  mc=${it.minecraftVersions.join(',')}") }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// reconcileRelease (issue #7)
+
+static Object cbHttpJson(String url) {
+    def conn = new URL(url).openConnection() as HttpURLConnection
+    conn.setRequestProperty('User-Agent', 'SimplyAG/CustomizableBrightness release-reconcile')
+    conn.setRequestProperty('Accept', 'application/json')
+    if (conn.responseCode != 200) throw new GradleException("GET ${url} -> HTTP ${conn.responseCode}")
+    new JsonSlurper().parse(conn.inputStream)
+}
+
+static void cbDownload(String url, File target) {
+    def conn = new URL(url).openConnection() as HttpURLConnection
+    conn.instanceFollowRedirects = true
+    conn.setRequestProperty('User-Agent', 'SimplyAG/CustomizableBrightness release-reconcile')
+    int code = conn.responseCode
+    if (code in [301, 302, 303, 307, 308]) {
+        cbDownload(conn.getHeaderField('Location'), target)
+        return
+    }
+    if (code != 200) throw new GradleException("download ${url} -> HTTP ${code}")
+    target.withOutputStream { it << conn.inputStream }
+}
+
+tasks.register('reconcileRelease') {
+    group = 'release'
+    description = "Downloads every published ${modVersion} file from Modrinth and CurseForge and checks it against the staged manifest."
+    outputs.upToDateWhen { false }
+    doLast {
+        def manifestFile = stagingDir.file('manifest.json').asFile
+        if (!manifestFile.exists()) throw new GradleException("No staged manifest at ${manifestFile}")
+        def manifest = new JsonSlurper().parse(manifestFile)
+        def expected = manifest.files.collectEntries { [(it.sha256): it] }
+        def work = layout.buildDirectory.dir("release/reconcile-${modVersion}").get().asFile
+        work.deleteDir()
+        work.mkdirs()
+
+        def rows = []      // [platform, id, file, status, detail]
+        def seen = [modrinth: [] as Set, curseforge: [] as Set]
+
+        Closure checkJar = { String platform, String id, String fileName, File jar, List<String> platformVersions, Map extra ->
+            def sha256 = cbDigest(jar, 'SHA-256')
+            def exp = expected[sha256]
+            if (exp == null) {
+                rows << [platform, id, fileName, 'UNEXPECTED', "sha256 ${sha256.take(16)}... matches no staged file"]
+                return
+            }
+            seen[platform] << exp.file
+            def problems = []
+            if (fileName != exp.file) problems << "file name ${fileName} != ${exp.file}"
+            if (extra.sha512 && extra.sha512 != exp.sha512) problems << 'platform sha512 != staged sha512'
+            new ZipFile(jar).withCloseable { zip ->
+                def names = zip.entries().collect { it.name }.sort()
+                if (names != exp.jarEntries) problems << "jar entries differ from staged: ${(names - exp.jarEntries) + (exp.jarEntries - names)}"
+                def fmj = new JsonSlurper().parse(zip.getInputStream(zip.getEntry('fabric.mod.json')))
+                if (fmj.version != manifest.modVersion) problems << "fabric.mod.json version ${fmj.version}"
+                def mc = fmj.depends.minecraft instanceof List ? fmj.depends.minecraft : [fmj.depends.minecraft]
+                if (mc != exp.minecraftDepends) problems << "fabric.mod.json minecraft ${mc} != ${exp.minecraftDepends}"
+                def mixins = new JsonSlurper().parse(zip.getInputStream(zip.getEntry('customizable-brightness.mixins.json')))
+                if (mixins.compatibilityLevel != exp.mixinLevel) problems << "mixin level ${mixins.compatibilityLevel} != ${exp.mixinLevel}"
+            }
+            def wantedTags = exp.minecraftVersions as Set
+            if ((platformVersions as Set) != wantedTags) problems << "platform game versions ${platformVersions} != ${exp.minecraftVersions}"
+            extra.tagProblems?.each { problems << it }
+            rows << [platform, id, fileName, problems ? 'MISMATCH' : 'ok', problems.join('; ')]
+        }
+
+        // Modrinth: public API, returns hashes and game versions per version.
+        def mrVersions = cbHttpJson('https://api.modrinth.com/v2/project/iCas2JlM/version')
+                .findAll { it.version_number == manifest.modVersion }
+        mrVersions.each { v ->
+            def tagProblems = []
+            if (v.loaders != ['fabric']) tagProblems << "loaders ${v.loaders}"
+            if (v.version_type != 'release') tagProblems << "type ${v.version_type}"
+            if (v.status != 'listed') tagProblems << "status ${v.status}"
+            if (v.files.size() != 1) tagProblems << "${v.files.size()} files in one version"
+            v.files.each { f ->
+                def local = new File(work, "modrinth-${v.id}-${f.filename}")
+                cbDownload(f.url, local)
+                checkJar('modrinth', v.id, f.filename, local, v.game_versions, [sha512: f.hashes.sha512, tagProblems: tagProblems])
+            }
+        }
+
+        // CurseForge: the official API needs a key. Use it if CURSEFORGE_API_KEY is set, otherwise the public
+        // (undocumented) endpoints the curseforge.com site itself uses.
+        def cfFiles = []
+        for (int page = 0; ; page++) {
+            def resp = cbHttpJson("https://www.curseforge.com/api/v1/mods/1388278/files?pageIndex=${page}&pageSize=50&sort=dateCreated&sortDescending=true")
+            cfFiles.addAll(resp.data)
+            if ((page + 1) * 50 >= resp.pagination.totalCount) break
+        }
+        cfFiles.findAll { it.fileName.endsWith("-${manifest.modVersion}.jar") }.each { f ->
+            def tagProblems = []
+            def tags = f.gameVersions as List
+            if (!tags.contains('Fabric')) tagProblems << 'missing Fabric tag'
+            if (!tags.contains('Client')) tagProblems << 'missing Client environment tag'
+            if (tags.contains('Server')) tagProblems << 'tagged Server (mod is client-only)'
+            if (f.releaseType != 1) tagProblems << "releaseType ${f.releaseType} (expected 1 = release)"
+            def gameVersions = tags.findAll { it ==~ /\d+(\.\d+)+/ }
+            def local = new File(work, "curseforge-${f.id}-${f.fileName}")
+            cbDownload("https://www.curseforge.com/api/v1/mods/1388278/files/${f.id}/download", local)
+            checkJar('curseforge', f.id as String, f.fileName, local, gameVersions, [tagProblems: tagProblems])
+        }
+
+        // Every staged file must be on both platforms exactly once.
+        manifest.files.each { exp ->
+            ['modrinth', 'curseforge'].each { platform ->
+                def count = rows.count { it[0] == platform && it[2] == exp.file && it[3] != 'UNEXPECTED' }
+                if (count == 0) rows << [platform, '-', exp.file, 'MISSING', 'staged file not published']
+                if (count > 1) rows << [platform, '-', exp.file, 'DUPLICATE', "published ${count} times"]
+            }
+        }
+
+        def table = new StringBuilder("platform    id          status      file / detail\n")
+        rows.sort { a, b -> a[2] <=> b[2] ?: a[0] <=> b[0] }.each { r ->
+            table << String.format('%-11s %-11s %-11s %s%s%n', r[0], r[1], r[3], r[2], r[4] ? "  -- ${r[4]}" : '')
+        }
+        def report = new File(work, 'reconcile-report.txt')
+        report.text = table.toString()
+        def bad = rows.findAll { it[3] != 'ok' }
+        if (bad) {
+            logger.error("\n==================== RECONCILE FAILED: ${bad.size()} problem(s) ====================\n${table}")
+            throw new GradleException("Reconcile found ${bad.size()} problem(s). Report: ${report}")
+        }
+        logger.lifecycle("\nReconcile OK: ${rows.size()} published files match the staged manifest.\n${table}")
+    }
+}

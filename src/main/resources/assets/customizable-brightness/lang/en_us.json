@@ -1,4 +1,7 @@
 {
-  "key.categories.customizable-brightness": "Customizable Brightness",
-  "key.customizable-brightness.cycle": "Cycle Brightness"
+  "category.customizable-brightness": "Customizable Brightness",
+  "key.category.customizable-brightness.brightness": "Customizable Brightness",
+  "key.customizable-brightness.cycle": "Cycle Brightness",
+  "customizable-brightness.hint.title": "Press %s",
+  "customizable-brightness.hint.description": "to cycle brightness"
 }

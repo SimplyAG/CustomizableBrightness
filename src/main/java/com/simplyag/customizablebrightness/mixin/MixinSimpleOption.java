@@ -1,7 +1,8 @@
 package com.simplyag.customizablebrightness.mixin;
 
 //? if >=26.1 {
-/*import com.simplyag.customizablebrightness.CustomizableBrightnessClient;
+/*import com.mojang.serialization.Codec;
+import com.simplyag.customizablebrightness.BrightnessController;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
@@ -20,20 +21,32 @@ public class MixinSimpleOption<T> {
     @Final
     private Component caption;
 
-    
+    @Shadow
+    @Final
+    private Codec<T> codec;
+
     @Inject(method = "get", at = @At("HEAD"), cancellable = true)
     public void getModValue(CallbackInfoReturnable<T> info) {
         if (isGammaOption()) {
-            info.setReturnValue((T)(Double)CustomizableBrightnessClient.getCurrentGamma());
+            info.setReturnValue((T)(Double)BrightnessController.get());
         }
     }
 
-    
     @Inject(method = "set", at = @At("HEAD"), cancellable = true)
     public void setModValue(T value, CallbackInfo info) {
         if (isGammaOption()) {
-            CustomizableBrightnessClient.setCurrentGamma((Double) value);
+            BrightnessController.onVanillaChange((Double) value);
             info.cancel();
+        }
+    }
+
+    // The gamma codec only accepts 0..1, so every options save above 100% logged "Error saving option" and
+    // dropped the line. Clamp what goes into options.txt; the mod config keeps the real value.
+    @Inject(method = "codec", at = @At("HEAD"), cancellable = true)
+    public void clampSavedValue(CallbackInfoReturnable<Codec<T>> info) {
+        if (isGammaOption()) {
+            Codec<Double> original = (Codec<Double>)(Object)codec;
+            info.setReturnValue((Codec<T>)(Object)original.xmap(value -> value, value -> Math.max(0.0, Math.min(1.0, value))));
         }
     }
 
@@ -49,7 +62,8 @@ public class MixinSimpleOption<T> {
 */
 //?} else {
 //? if >=1.19 {
-import com.simplyag.customizablebrightness.CustomizableBrightnessClient;
+import com.mojang.serialization.Codec;
+import com.simplyag.customizablebrightness.BrightnessController;
 import net.minecraft.client.option.SimpleOption;
 import net.minecraft.text.Text;
 import net.minecraft.text.TranslatableTextContent;
@@ -68,18 +82,32 @@ public class MixinSimpleOption<T> {
     @Final
     Text text;
 
+    @Shadow
+    @Final
+    private Codec<T> codec;
+
     @Inject(method = "getValue", at = @At("HEAD"), cancellable = true)
     public void getModValue(CallbackInfoReturnable<Double> info) {
         if (isGammaOption()) {
-            info.setReturnValue(CustomizableBrightnessClient.getCurrentGamma());
+            info.setReturnValue(BrightnessController.get());
         }
     }
 
     @Inject(method = "setValue", at = @At("HEAD"), cancellable = true)
     public void setModValue(T value, CallbackInfo info) {
         if (isGammaOption()) {
-            CustomizableBrightnessClient.setCurrentGamma((Double) value);
+            BrightnessController.onVanillaChange((Double) value);
             info.cancel();
+        }
+    }
+
+    // The gamma codec only accepts 0..1, so every options save above 100% logged "Error saving option" and
+    // dropped the line. Clamp what goes into options.txt; the mod config keeps the real value.
+    @Inject(method = "getCodec", at = @At("HEAD"), cancellable = true)
+    public void clampSavedValue(CallbackInfoReturnable<Codec<T>> info) {
+        if (isGammaOption()) {
+            Codec<Double> original = (Codec<Double>)(Object)codec;
+            info.setReturnValue((Codec<T>)(Object)original.xmap(value -> value, value -> Math.max(0.0, Math.min(1.0, value))));
         }
     }
 
@@ -91,31 +119,13 @@ public class MixinSimpleOption<T> {
         return false;
     }
 }
-//?} else if >=1.16.5 {
-/*
-import com.simplyag.customizablebrightness.CustomizableBrightnessClient;
-import net.minecraft.client.option.GameOptions;
-import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-
-@Mixin(GameOptions.class)
-public class MixinSimpleOption {
-    @Shadow
-    public double gamma;
-
-    @Inject(method = "write", at = @At("HEAD"))
-    private void onWrite(CallbackInfo ci) {
-        gamma = CustomizableBrightnessClient.getCurrentGamma();
-    }
-}
-*/
 //?} else {
-/*
-import com.simplyag.customizablebrightness.CustomizableBrightnessClient;
-import net.minecraft.client.options.GameOptions;
+/*import com.simplyag.customizablebrightness.BrightnessController;
+//? if >=1.16.5 {
+import net.minecraft.client.option.GameOptions;
+//?} else {
+/^import net.minecraft.client.options.GameOptions;^/
+//?}
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -127,9 +137,11 @@ public class MixinSimpleOption {
     @Shadow
     public double gamma;
 
+    // These versions keep gamma in a plain field that the Brightness slider writes directly. The tick handler
+    // picks slider changes up, but a change and the save that follows can land in the same tick.
     @Inject(method = "write", at = @At("HEAD"))
     private void onWrite(CallbackInfo ci) {
-        gamma = CustomizableBrightnessClient.getCurrentGamma();
+        BrightnessController.onVanillaChange(gamma);
     }
 }
 */

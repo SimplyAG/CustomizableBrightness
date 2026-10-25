@@ -1,0 +1,166 @@
+// Per-target release wiring, shared by build.gradle (Yarn targets) and mojmap.gradle (26.x targets).
+// Apply it right after the plugins block: it sets ext.cb* values the build script uses afterwards.
+//
+//   ext.cbGroupVersions   Minecraft versions served by this target's release group (release-groups.json)
+//   ext.cbIsLead          true if this target builds the group's published jar (the group's first version)
+//   ext.cbJavaVersion     Java level of the group lead; every member compiles at it, so classes can be compared
+//   ext.cbMinecraftRange  ">=<lead>", the published jar's fabric.mod.json "depends.minecraft"
+//   ext.cbMinecraftDep    JSON array for fabric.mod.json "depends.minecraft"
+//   ext.cbReleaseJarFile  the jar that is verified, staged and published
+//
+//   verifyJarContents     fails if the jar contains anything outside the allowlist (wired into build)
+//   publishModrinth / publishCurseforge only ever upload the staged file, after verifyStagedRelease
+
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+
+import java.security.MessageDigest
+import java.util.zip.ZipFile
+
+def mcVersion = project.property('minecraft_version') as String
+def releaseGroup = rootProject.ext.cbReleaseGroups.find { it.minecraft.contains(mcVersion) }
+if (releaseGroup == null) throw new GradleException("Minecraft ${mcVersion} is missing from release-groups.json")
+
+def leadVersion = releaseGroup.minecraft[0] as String
+def leadProperties = new Properties()
+rootProject.file("versions/${leadVersion}/gradle.properties").withInputStream { leadProperties.load(it) }
+
+ext.cbGroupVersions = releaseGroup.minecraft as List<String>
+ext.cbIsLead = leadVersion == mcVersion
+ext.cbJavaVersion = Integer.parseInt(leadProperties.getProperty('java_version', '21'))
+ext.cbFabricApiId = project.findProperty('fabric_api_id') ?: 'fabric'
+// The published jar declares only a minimum: on a newer Minecraft it loads, and anything it uses that changed fails
+// at startup (mixins, startup-linked calls). Platform tags stay the exact tested versions. Members only build to
+// prove their classes match the lead's, so they keep a single-version dependency.
+ext.cbMinecraftRange = ">=${leadVersion}".toString()
+ext.cbMinecraftDep = JsonOutput.toJson(cbIsLead ? [cbMinecraftRange] : [mcVersion])
+// The same list for the fabric.mod.json template, which writes it as ["${minecraft_dep}"] so the unexpanded file
+// is still valid JSON (Loom parses it at configuration time). Expands to exactly cbMinecraftDep.
+ext.cbMinecraftDepItems = (cbIsLead ? [cbMinecraftRange] : [mcVersion]).join('","')
+def groupSuffix = cbGroupVersions.size() > 1 ? "${cbGroupVersions.first()}-${cbGroupVersions.last()}" : leadVersion
+ext.cbArchiveSuffix = cbIsLead ? groupSuffix : mcVersion
+ext.cbVersionLabel = cbGroupVersions.size() > 1 ? "${cbGroupVersions.first()}–${cbGroupVersions.last()}" : leadVersion
+
+def releaseJarTask = tasks.names.contains('remapJar') ? tasks.named('remapJar') : tasks.named('jar')
+ext.cbReleaseJarFile = releaseJarTask.flatMap { it.archiveFile }
+tasks.register('cbReleaseJar') { dependsOn releaseJarTask }
+
+def stagingDir = rootProject.layout.projectDirectory.dir("release-staging/${project.mod_version}")
+// The group's staged jar (same file for every member). A plain string, not derived from the jar task, so nothing
+// that uses the staged path depends on a build task. The lead's base.archivesName uses the same suffix.
+ext.cbStagedJar = stagingDir.file("${project.archives_base_name}-mc${groupSuffix}-${project.mod_version}.jar")
+
+// Everything a release jar may contain. Anything else (stray "fabric.mod 2.json" copies, leftovers in
+// build/resources) fails the build.
+def jarAllowlist = [
+        ~/META-INF\//,
+        ~/META-INF\/MANIFEST\.MF/,
+        ~/fabric\.mod\.json/,
+        ~/customizable-brightness\.mixins\.json/,
+        ~/customizable-brightness-refmap\.json/,
+        ~/LICENSE_customizable-brightness-mc[0-9.-]+/,
+        ~/assets\//,
+        ~/assets\/customizable-brightness\//,
+        ~/assets\/customizable-brightness\/icon\.png/,
+        ~/assets\/customizable-brightness\/lang\//,
+        ~/assets\/customizable-brightness\/lang\/en_us\.json/,
+        ~/com\//,
+        ~/com\/simplyag\//,
+        ~/com\/simplyag\/customizablebrightness\/([A-Za-z0-9_$]+\/)*/,
+        ~/com\/simplyag\/customizablebrightness\/([A-Za-z0-9_$]+\/)*[A-Za-z0-9_$]+\.class/,
+]
+def requiredEntries = ['fabric.mod.json', 'customizable-brightness.mixins.json',
+                       'assets/customizable-brightness/icon.png', 'assets/customizable-brightness/lang/en_us.json']
+
+def verifyJarContents = tasks.register('verifyJarContents') {
+    group = 'verification'
+    description = 'Fails if the release jar holds files outside the allowlist or misses required ones.'
+    dependsOn releaseJarTask
+    def jarFile = cbReleaseJarFile
+    def expectedMixinLevel = "JAVA_${cbJavaVersion}"
+    def expectedMinecraft = new JsonSlurper().parseText(cbMinecraftDep)
+    def expectedVersion = project.version.toString()
+    inputs.file(jarFile)
+    doLast {
+        def problems = []
+        new ZipFile(jarFile.get().asFile).withCloseable { zip ->
+            def names = zip.entries().collect { it.name }
+            names.findAll { n -> !jarAllowlist.any { n ==~ it } }.each { problems << "unexpected entry: ${it}" }
+            requiredEntries.findAll { !names.contains(it) }.each { problems << "missing entry: ${it}" }
+            if (!names.any { it.startsWith('LICENSE_') }) problems << 'missing LICENSE'
+            if (names.contains('fabric.mod.json')) {
+                def fmj = new JsonSlurper().parse(zip.getInputStream(zip.getEntry('fabric.mod.json')))
+                if (fmj.version != expectedVersion) problems << "fabric.mod.json version ${fmj.version} != ${expectedVersion}"
+                if (fmj.depends.minecraft != expectedMinecraft) problems << "fabric.mod.json minecraft ${fmj.depends.minecraft} != ${expectedMinecraft}"
+            }
+            if (names.contains('customizable-brightness.mixins.json')) {
+                def level = new JsonSlurper().parse(zip.getInputStream(zip.getEntry('customizable-brightness.mixins.json'))).compatibilityLevel
+                if (level != expectedMixinLevel) problems << "mixin compatibilityLevel ${level} != ${expectedMixinLevel}"
+            }
+        }
+        if (problems) throw new GradleException("${jarFile.get().asFile.name}:\n  " + problems.join('\n  '))
+    }
+}
+tasks.named('build') { dependsOn verifyJarContents }
+
+static String cbSha256(File file) {
+    def md = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int read
+        while ((read = input.read(buffer)) > 0) md.update(buffer, 0, read)
+    }
+    md.digest().encodeHex().toString()
+}
+
+// Gate in front of every upload: the staged file is exactly what was verified.
+def verifyStagedRelease = tasks.register('verifyStagedRelease') {
+    group = 'release'
+    description = 'Checks the staged jar against the manifest and the smoke-test results before publishing.'
+    def staged = cbStagedJar
+    def manifestFile = stagingDir.file('manifest.json')
+    def groupVersions = cbGroupVersions
+    def isLead = cbIsLead
+    def lead = leadVersion
+    outputs.upToDateWhen { false }
+    doLast {
+        if (!isLead) throw new GradleException("${mcVersion} is published as part of the ${lead} group jar; publish :${lead} instead.")
+        def stagedFile = staged.asFile
+        if (!stagedFile.exists()) throw new GradleException("Not staged: ${stagedFile}. Run stageRelease first.")
+        def manifest = new JsonSlurper().parse(manifestFile.asFile)
+        def entry = manifest.files.find { it.file == stagedFile.name }
+        if (entry == null) throw new GradleException("${stagedFile.name} is not in the staged manifest")
+        def sha = cbSha256(stagedFile)
+        if (sha != entry.sha256) throw new GradleException("${stagedFile.name} changed since staging (sha256 ${sha} != ${entry.sha256})")
+        def tree = ['git', 'rev-parse', 'HEAD^{tree}'].execute(null, rootDir).text.trim()
+        if (tree != manifest.gitTree) {
+            throw new GradleException("Checked-out tree ${tree} differs from the tree the release was staged from (${manifest.gitTree}).")
+        }
+        if (!['git', 'status', '--porcelain', '--untracked-files=no'].execute(null, rootDir).text.trim().isEmpty()) {
+            throw new GradleException("Uncommitted changes in the checkout; publish from the exact commit that was staged.")
+        }
+        // Smoke results are written by smokeTest into release-staging/<version>/smoke/<mc>.json.
+        def missing = groupVersions.findAll { v ->
+            def result = stagingDir.file("smoke/${v}.json").asFile
+            if (!result.exists()) return true
+            def json = new JsonSlurper().parse(result)
+            !(json.passed == true && json.modJarSha256 == entry.sha256)
+        }
+        if (missing) throw new GradleException("No passing smoke test of ${stagedFile.name} on: ${missing.join(', ')}")
+        logger.lifecycle("${stagedFile.name}: sha256 ok, tree ok, smoke-tested on ${groupVersions.join(', ')}")
+    }
+}
+
+publishMods {
+    // The staged file, never a task output: publishing cannot rebuild or remap anything.
+    file = cbStagedJar
+    displayName = "Customizable Brightness ${project.mod_version} - MC ${cbVersionLabel}"
+    changelog = providers.fileContents(rootProject.layout.projectDirectory.file("release-notes/${project.mod_version}.md")).asText
+    type = STABLE
+    modLoaders.add('fabric')
+    dryRun = providers.gradleProperty('publishDryRun').map { it.toBoolean() }.orElse(false)
+}
+
+tasks.matching { it.name in ['publishModrinth', 'publishCurseforge', 'publishMods'] }.configureEach {
+    dependsOn verifyStagedRelease
+}
