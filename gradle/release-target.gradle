@@ -125,9 +125,9 @@ def verifyStagedRelease = tasks.register('verifyStagedRelease') {
     outputs.upToDateWhen { false }
     doLast {
         if (!isLead) throw new GradleException("${mcVersion} is published as part of the ${lead} group jar; publish :${lead} instead.")
-        def stagedFile = staged.get().asFile
+        def stagedFile = staged.asFile
         if (!stagedFile.exists()) throw new GradleException("Not staged: ${stagedFile}. Run stageRelease first.")
-        def manifest = new JsonSlurper().parse(manifestFile.get().asFile)
+        def manifest = new JsonSlurper().parse(manifestFile.asFile)
         def entry = manifest.files.find { it.file == stagedFile.name }
         if (entry == null) throw new GradleException("${stagedFile.name} is not in the staged manifest")
         def sha = cbSha256(stagedFile)
@@ -135,6 +135,9 @@ def verifyStagedRelease = tasks.register('verifyStagedRelease') {
         def tree = ['git', 'rev-parse', 'HEAD^{tree}'].execute(null, rootDir).text.trim()
         if (tree != manifest.gitTree) {
             throw new GradleException("Checked-out tree ${tree} differs from the tree the release was staged from (${manifest.gitTree}).")
+        }
+        if (!['git', 'status', '--porcelain', '--untracked-files=no'].execute(null, rootDir).text.trim().isEmpty()) {
+            throw new GradleException("Uncommitted changes in the checkout; publish from the exact commit that was staged.")
         }
         // Smoke results are written by smokeTest into release-staging/<version>/smoke/<mc>.json.
         def missing = groupVersions.findAll { v ->
