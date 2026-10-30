@@ -43,6 +43,7 @@ public class SmokeClient implements ClientModInitializer {
     // The launch that creates the world: 0 in the full matrix (it leaves the key hint alone), else 1.
     private int first;
     private boolean startedMarked;
+    private boolean muted;
     private boolean createPressed = false;
     private Path dir;
 
@@ -69,6 +70,10 @@ public class SmokeClient implements ClientModInitializer {
                 java.lang.management.ManagementFactory.getRuntimeMXBean().getInputArguments());
         startWatchdog();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (!muted) {
+                muted = true;
+                Mc.mute(client);
+            }
             try {
                 tick(client);
             } catch (Throwable t) {

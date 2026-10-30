@@ -108,7 +108,8 @@ tasks.register('stageRelease') {
     doLast {
         def dir = stagingDir.asFile
         dir.mkdirs()
-        def entries = releaseGroups.collect { g ->
+        def targets = ((findProperty('release_targets') ?: '') as String).split(',')*.trim().findAll()
+        def entries = releaseGroups.findAll { !targets || targets.contains(it.minecraft[0]) }.collect { g ->
             def lead = project(":${g.minecraft[0]}")
             File jar = lead.ext.cbReleaseJarFile.get().asFile
             File staged = new File(dir, jar.name)

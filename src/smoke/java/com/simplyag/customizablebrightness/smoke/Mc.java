@@ -18,6 +18,7 @@ import net.minecraft.client.gui.screens.worldselection.CreateWorldScreen;
 import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.sounds.SoundSource;
 //? if <26.3 {
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.glfw.GLFWKeyCallback;
@@ -149,6 +150,11 @@ final class Mc {
     static void openVideoSettings(Object client) {
         setScreen(client, new PauseScreen(true));
         setScreen(client, new VideoSettingsScreen(screen(client), mc(client), mc(client).options));
+    }
+
+    // The seeded options.txt can be ignored (seen on some first launches), so the harness also mutes in code.
+    static void mute(Object client) {
+        mc(client).options.getSoundSourceOptionInstance(SoundSource.MASTER).set(0.0);
     }
 
     // What the Video Settings Brightness slider calls when it moves.
@@ -397,6 +403,10 @@ final class Mc {
         //?} else {
         /*setScreen(client, new VideoOptionsScreen(screen(client), mc(client).options));*/
         //?}
+    }
+
+    // Yarn targets rely on the seeded options.txt.
+    static void mute(Object client) {
     }
 
     // What the Video Settings Brightness slider calls when it moves.

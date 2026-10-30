@@ -80,6 +80,14 @@ def launcher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersio
 
 def variants = ['vanilla': []]
 if (project.findProperty('smoke_sodium')) variants['sodium'] = [detached(project.smoke_sodium as String)]
+// smoke_shaderpacks=<variant>=<pack coordinate>,...: each pack runs as its own variant with Sodium + Iris
+// (smoke_iris_sodium, smoke_iris) and the pack switched on, so brightness is measured through a shader pack.
+def shaderPacks = [:]
+((project.findProperty('smoke_shaderpacks') ?: '') as String).split(',')*.trim().findAll().each { entry ->
+    def (name, coordinate) = entry.split('=', 2)*.trim()
+    variants[name] = [detached(project.smoke_iris_sodium as String), detached(project.smoke_iris as String)]
+    shaderPacks[name] = detached(coordinate)
+}
 
 def resultDir = rootProject.layout.projectDirectory.dir("release-staging/${project.mod_version}/smoke")
 def smokeChecks = []
@@ -95,12 +103,8 @@ variants.each { variant, extraMods ->
     int first = fullSmoke(variant) ? 0 : 1
     def gameDir = layout.buildDirectory.dir("smoke/${variant}")
 
-    def prepare = tasks.register("smokePrepare${cap}") {
-        group = 'smoke'
-        outputs.upToDateWhen { false }
-        doLast {
+    def seedGameDir = {
             def dir = gameDir.get().asFile
-            dir.deleteDir()
             dir.mkdirs()
             // Seed only what keeps a headless run deterministic; everything else stays at vanilla defaults.
             new File(dir, 'options.txt').text = [
@@ -109,6 +113,22 @@ variants.each { variant, extraMods ->
                     'renderDistance:6', 'fov:0.0',
                     'soundCategory_master:0.0' // silent: the harness needs no sound, and it would play over whatever the user is doing
             ].join('\n') + '\n'
+            def pack = shaderPacks[variant]
+            if (pack != null) {
+                File zip = pack.singleFile
+                def packs = new File(dir, 'shaderpacks')
+                packs.mkdirs()
+                java.nio.file.Files.copy(zip.toPath(), new File(packs, zip.name).toPath())
+                new File(dir, 'config').mkdirs()
+                new File(dir, 'config/iris.properties').text = "enableShaders=true\nshaderPack=${zip.name}\n"
+            }
+    }
+    def prepare = tasks.register("smokePrepare${cap}") {
+        group = 'smoke'
+        outputs.upToDateWhen { false }
+        doLast {
+            gameDir.get().asFile.deleteDir()
+            seedGameDir()
         }
     }
 
@@ -118,6 +138,15 @@ variants.each { variant, extraMods ->
         def launch = tasks.register("smokeLaunch${cap}${i}", productionRunTask) {
             group = 'smoke'
             dependsOn after, smokeModJar
+            if (i == first) {
+                // Seen on some runs: the seeded folder is gone by the time the first launch starts.
+                doFirst {
+                    if (!gameDir.get().file('options.txt').asFile.exists()) {
+                        logger.lifecycle("smoke ${variant}: seeded game folder was gone before launch ${i}; seeding again")
+                        seedGameDir()
+                    }
+                }
+            }
             // Replace Loom's defaults (which add this project's own freshly built jar): exactly these mods run.
             mods.setFrom(modJarPath, smokeModJar, runtimeMods, extraMods)
             runDir = gameDir
@@ -185,7 +214,16 @@ variants.each { variant, extraMods ->
         doLast {
             def dir = gameDir.get().asFile
             File modJar = modJarPath.get()
-            def result = cbEvaluateSmoke(new File(dir, 'cbsmoke'), new File(dir, 'cbsmoke/launch-logs'), first, launches, cbAtLeast(mcVersion, '1.19'))
+            def result = cbEvaluateSmoke(new File(dir, 'cbsmoke'), new File(dir, 'cbsmoke/launch-logs'), first, launches, cbAtLeast(mcVersion, '1.19'), cbAtLeast(mcVersion, '26.1'))
+            if (shaderPacks.containsKey(variant)) {
+                // Without the pack this run would only be re-testing vanilla.
+                def noPack = (first..launches).findAll { l ->
+                    def log = new File(dir, "cbsmoke/launch-logs/launch-${l}.log")
+                    !log.exists() || !log.getText('UTF-8').contains('Using shaderpack:')
+                }
+                result.checks << [name: 'shader pack active in every launch', ok: noPack.isEmpty(), detail: noPack ? "missing in launches ${noPack}" : '']
+                if (noPack) result.passed = false
+            }
             result.minecraft = mcVersion
             result.variant = variant
             result.modJar = modJar.name
@@ -273,7 +311,7 @@ static boolean cbAtLeast(String version, String min) {
     true
 }
 
-static Map cbEvaluateSmoke(File dir, File logs, int first, int launches, boolean vanillaValidatesGamma) {
+static Map cbEvaluateSmoke(File dir, File logs, int first, int launches, boolean vanillaValidatesGamma, boolean optionStopsAt100) {
     def checks = []
     def check = { name, ok, detail = null -> checks << [name: name as String, ok: ok as boolean, detail: detail as String] }
     def resultsFile = new File(dir, 'results.jsonl')
@@ -290,6 +328,8 @@ static Map cbEvaluateSmoke(File dir, File logs, int first, int launches, boolean
     def lum = [:]
     states.each { s -> def f = shot(s); if (f?.exists()) lum[s] = cbLuminance(f) }
     def near = { a, b -> a != null && b != null && Math.abs((a as double) - (b as double)) < 1e-4 }
+    // 26.x: the gamma option stays within 0..1 and only the lightmap takes the real brightness.
+    def optionShows = { v -> optionStopsAt100 ? Math.min(v as double, 1.0d) : v }
 
     // Every launch ran to the end.
     (first..launches).each { l ->
@@ -298,12 +338,12 @@ static Map cbEvaluateSmoke(File dir, File logs, int first, int launches, boolean
 
     // Launch 1: fresh install starts at 100%, five real B presses walk the default stops.
     def initial = state(first, 'initial')
-    check('fresh install starts at 100%', near(initial?.modGamma, 1.0) && near(initial?.vanillaGamma, 1.0),
+    check('fresh install starts at 100%', near(initial?.modGamma, 1.0) && near(initial?.vanillaGamma, optionShows(1.0)),
             "mod=${initial?.modGamma} vanilla=${initial?.vanillaGamma}")
     def expectedStops = [2.0, 5.0, 10.0, 0.0, 1.0]
     expectedStops.eachWithIndex { expected, i ->
         def s = state(1, "press-${i + 1}")
-        check("B press ${i + 1} -> ${(int) (expected * 100)}%", near(s?.modGamma, expected) && near(s?.vanillaGamma, expected),
+        check("B press ${i + 1} -> ${(int) (expected * 100)}%", near(s?.modGamma, expected) && near(s?.vanillaGamma, optionShows(expected)),
                 "mod=${s?.modGamma} vanilla=${s?.vanillaGamma}")
     }
 
@@ -330,7 +370,7 @@ static Map cbEvaluateSmoke(File dir, File logs, int first, int launches, boolean
         def after = state(l, 'restored')
         def scenario = events.find { it.launch == l - 1 && it.event == 'quit' }?.scenario
         check("persist: ${scenario} (launch ${l - 1} -> ${l})",
-                near(before?.modGamma, after?.modGamma) && near(after?.modGamma, after?.vanillaGamma),
+                near(before?.modGamma, after?.modGamma) && after?.modGamma != null && near(optionShows(after.modGamma), after?.vanillaGamma),
                 "quit mod=${before?.modGamma} | restored mod=${after?.modGamma} vanilla=${after?.vanillaGamma} options.txt=${after?.optionsGamma}")
     }
 

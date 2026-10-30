@@ -45,7 +45,7 @@ Values are multipliers (`1.0` = 100%) and are shown as percentages in game. For 
 
 ## Known limitations
 
-- **Shader packs** (Iris, OptiFine shaders) mostly do their own lighting and ignore Minecraft's brightness above 100%. With a shader pack active, 0%–100% works, but higher levels look like 100%. Without shaders every level works, including with Sodium.
+- **Shader packs** do their own lighting. On Minecraft 26.1 and newer with Iris, levels above 100% raise the pack's own lighting, reaching full at 1000%; how strong that looks depends on the pack (tested with Complementary Reimagined and Unbound). On older Minecraft versions, levels above 100% may do little or nothing under shaders. Without shaders every level works.
 - The vanilla Brightness slider only goes to 100%. Moving it sets the brightness to the slider's value, which is kept like any other level; the next `B` press continues from the nearest stop above it.
 
 ## Building

@@ -29,6 +29,12 @@ base {
 
 repositories {
 	maven {
+		// Smoke-test only (Sodium, Iris and shader packs); limited to its own group so it never resolves anything else.
+		name = "Modrinth"
+		url = "https://api.modrinth.com/maven"
+		content { includeGroup "maven.modrinth" }
+	}
+	maven {
 		name = "TerraformersMC"
 		url = "https://maven.terraformersmc.com/"
 	}
@@ -73,9 +79,10 @@ processResources {
 
 	// The shared mixins.json hardcodes JAVA_21 (correct for the Yarn targets). The unobfuscated
 	// targets compile at Java 25, so bump the mixin compatibility level here only, at resource
-	// processing time, leaving the shared source file byte-for-byte unchanged.
+	// processing time, leaving the shared source file byte-for-byte unchanged. The lightmap and shader brightness
+	// mixins exist only on these targets, so they join the list the same way.
 	filesMatching("customizable-brightness.mixins.json") {
-		filter { String line -> line.replace('"JAVA_21"', "\"JAVA_${javaVersion}\"") }
+		filter { String line -> line.replace('"JAVA_21"', "\"JAVA_${javaVersion}\"").replace('"MixinSimpleOption"', '"MixinSimpleOption", "MixinGameRenderer", "MixinLightmap"') }
 	}
 }
 
