@@ -1,8 +1,7 @@
 package com.simplyag.customizablebrightness.mixin;
 
 //? if >=26.1 {
-/*import com.mojang.serialization.Codec;
-import com.simplyag.customizablebrightness.BrightnessController;
+/*import com.simplyag.customizablebrightness.BrightnessController;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
@@ -21,14 +20,12 @@ public class MixinSimpleOption<T> {
     @Final
     private Component caption;
 
-    @Shadow
-    @Final
-    private Codec<T> codec;
-
+    // The option stays within the 0..1 its readers expect: options.txt, Sodium (which resets an out-of-range value to
+    // its default at startup) and shader packs. The lightmap takes the real brightness, see MixinLightmap.
     @Inject(method = "get", at = @At("HEAD"), cancellable = true)
     public void getModValue(CallbackInfoReturnable<T> info) {
         if (isGammaOption()) {
-            info.setReturnValue((T)(Double)BrightnessController.get());
+            info.setReturnValue((T)(Double)Math.min(BrightnessController.get(), 1.0));
         }
     }
 
@@ -37,16 +34,6 @@ public class MixinSimpleOption<T> {
         if (isGammaOption()) {
             BrightnessController.onVanillaChange((Double) value);
             info.cancel();
-        }
-    }
-
-    // The gamma codec only accepts 0..1, so every options save above 100% logged "Error saving option" and
-    // dropped the line. Clamp what goes into options.txt; the mod config keeps the real value.
-    @Inject(method = "codec", at = @At("HEAD"), cancellable = true)
-    public void clampSavedValue(CallbackInfoReturnable<Codec<T>> info) {
-        if (isGammaOption()) {
-            Codec<Double> original = (Codec<Double>)(Object)codec;
-            info.setReturnValue((Codec<T>)(Object)original.xmap(value -> value, value -> Math.max(0.0, Math.min(1.0, value))));
         }
     }
 
